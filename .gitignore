@@ -43,5 +43,3 @@ tsconfig.tsbuildinfo
 /.workbuddy/
 /.opencode/
 /.playwright-mcp/
-# Pi upstream CI lives here (its workflows auto-close issues/PRs; ours comes later)
-/.github/

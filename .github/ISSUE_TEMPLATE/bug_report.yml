@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in Forge doesn't work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in the details below —
+        concrete steps and logs make the difference between a quick fix and a long guess.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us what you expected to happen instead.
+      placeholder: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, concrete steps. Include the exact command or UI action.
+      placeholder: |
+        1. Run `...`
+        2. Open `...`
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: |
+        Paste console output or the session's event log
+        (`~/.forge/events/<taskId>.events.jsonl`). Redact API keys.
+      render: shell
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options:
+        - Desktop app (Tauri)
+        - CLI (`forge run`)
+        - `forge serve` / API
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Model provider and model id
+      description: e.g. anthropic/claude-opus-4-8, openai-compatible/MiniMax-M3
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: e.g. macOS 15.4 (arm64), Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, related issues, what you already tried.
