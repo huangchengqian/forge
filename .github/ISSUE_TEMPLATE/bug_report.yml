@@ -40,8 +40,8 @@ body:
       label: Where did it happen?
       options:
         - Desktop app (Tauri)
-        - CLI (`forge run`)
-        - `forge serve` / API
+        - "CLI (`forge run`)"
+        - "`forge serve` / API"
         - Not sure
     validations:
       required: true
