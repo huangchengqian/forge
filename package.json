@@ -1,0 +1,25 @@
+{
+  "name": "forge",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Autonomous engineering orchestration system. Phase 1 vertical slice.",
+  "bin": {
+    "forge": "./dist/cli/run.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node --enable-source-maps dist/cli/run.js",
+    "demo": "node --enable-source-maps --import tsx/esm src/cli/run.ts",
+    "clean": "rm -rf dist",
+    "bench": "node --enable-source-maps --import tsx/esm src/cli/benchmark.ts",
+    "typecheck:bench": "tsc --noEmit -p tsconfig.benchmark.json"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.22.1",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {}
+}

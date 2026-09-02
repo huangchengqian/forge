@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Forge</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1117;
+        --bg-secondary: #161b22;
+        --border: #21262d;
+        --border-strong: #30363d;
+        --text: #e6edf3;
+        --text-secondary: #c9d1d9;
+        --text-muted: #6e7681;
+        --accent: #1f6feb;
+        --green: #3fb950;
+        --red: #f85149;
+        --yellow: #d29922;
+        --error-bg: #2a0a0a;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --bg-secondary: #f6f8fa;
+        --border: #d0d7de;
+        --border-strong: #afb8c1;
+        --text: #1f2328;
+        --text-secondary: #424a53;
+        --text-muted: #656d76;
+        --accent: #0969da;
+        --green: #1a7f37;
+        --red: #cf222e;
+        --yellow: #9a6700;
+        --error-bg: #ffebe9;
+      }
+      body { margin: 0; background: var(--bg); }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

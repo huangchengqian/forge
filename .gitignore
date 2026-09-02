@@ -1,0 +1,47 @@
+.DS_Store
+node_modules
+.worktrees
+.sst
+.env
+.env.local
+.idea
+.vscode
+.codex
+*~
+playground
+tmp
+dist
+ts-dist
+.turbo
+# Forge: Pi is a sibling submodule, not part of this repo
+/pi/
+# Forge: generated artifacts and local state
+/src/.forge-cache/
+/coverage/
+*.tsbuildinfo
+**/.serena
+.serena/
+**/.omo
+.omo/
+/result
+refs
+Session.vim
+/opencode.json
+a.out
+target
+.scripts
+.direnv/
+
+# Local dev files
+opencode-dev
+UPCOMING_CHANGELOG.md
+logs/
+*.bun-build
+tsconfig.tsbuildinfo
+
+# Forge: local tooling / workspace state — never publish
+/.workbuddy/
+/.opencode/
+/.playwright-mcp/
+# Pi upstream CI lives here (its workflows auto-close issues/PRs; ours comes later)
+/.github/
