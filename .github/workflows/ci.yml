@@ -12,9 +12,9 @@ jobs:
     timeout-minutes: 20
     env:
       # CI has no model API keys and no ~/.forge; the release check must pass
-      # entirely on local, deterministic verification.
+      # entirely on local, deterministic verification. (Note: `runner` context
+      # is unavailable in job-level env, so FORGE_HOME is set at step level.)
       FORGE_RUNTIME: fake
-      FORGE_HOME: ${{ runner.temp }}/forge-home
       CI: "true"
     steps:
       - uses: actions/checkout@v4
@@ -30,4 +30,6 @@ jobs:
           npm install --no-audit --no-fund --prefix desktop
 
       - name: Release verification
+        env:
+          FORGE_HOME: ${{ runner.temp }}/forge-home
         run: bash scripts/release-check.sh
