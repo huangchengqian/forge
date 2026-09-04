@@ -8,12 +8,10 @@ import https from "node:https";
  */
 
 export type ProviderEndpoint = {
-  kind: string;
+  api: string;
   apiKey: string;
   modelId: string;
   baseUrl: string;
-  /** Wire protocol; "anthropic-messages" (default) or "openai-completions"/"openai-responses". */
-  api?: string;
 };
 
 export type ProviderResponse = {

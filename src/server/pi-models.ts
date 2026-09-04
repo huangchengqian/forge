@@ -1,9 +1,9 @@
 /**
- * Pi custom-model integration (openai-compatible providers).
+ * Pi custom-model integration (every configured provider).
  *
- * Pi does not know a provider named "openai-compatible". Custom endpoints are
- * declared in Pi's models.json (`<agentDir>/models.json`), keyed by a Forge
- * stable name, with the wire protocol chosen via `api`:
+ * Pi does not know Forge's configured endpoints. All providers are declared
+ * in Pi's models.json (`<agentDir>/models.json`), keyed by a Forge stable
+ * name, with the wire protocol chosen via `api`:
  *   "anthropic-messages" | "openai-completions" | "openai-responses"
  * (verified against pi-ai compat registry + provider-composer).
  *
@@ -27,14 +27,18 @@ export function piAgentDir(forgeHome: string): string {
  * models.json. No-op for built-in providers. Returns the provider name to
  * pass to Pi via --provider.
  */
+/**
+ * Write (or refresh) the configured provider into Forge's pi-agent
+ * models.json. Every configured provider — regardless of protocol or vendor —
+ * is declared to Pi as `custom`; the protocol is carried by `api`. Returns the
+ * provider name to pass to Pi via --provider (always `custom`).
+ */
 export async function syncCustomModels(forgeHome: string, provider: ProviderConfig): Promise<string> {
-  if (provider.kind !== "openai-compatible") return provider.kind;
-
   const dir = piAgentDir(forgeHome);
   const modelsJson = {
     providers: {
       [CUSTOM_PROVIDER_NAME]: {
-        api: provider.api ?? "openai-completions",
+        api: provider.api,
         baseUrl: provider.baseUrl,
         apiKey: provider.apiKey,
         models: [{ id: provider.modelId }],

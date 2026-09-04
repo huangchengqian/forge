@@ -31,7 +31,7 @@ export type ApprovalListener = (request: ApprovalRequest) => void;
 export type PiRuntimeOptions = {
   /** Receives guard approval requests from the extension (relay to the UI). */
   onApprovalRequest?: ApprovalListener;
-  /** Forge-owned Pi agent dir (custom models.json); set for openai-compatible providers. */
+  /** Forge-owned Pi agent dir (custom models.json); set when a provider is configured. */
   piAgentDir?: string;
   /**
    * Streams every raw Pi event (agent message deltas, tool calls, tool

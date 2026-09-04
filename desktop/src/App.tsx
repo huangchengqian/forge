@@ -19,7 +19,7 @@ declare global {
 const cfg = window.__FORGE_CONFIG__ ?? { baseUrl: "http://127.0.0.1:5300", token: "" };
 
 type ConfigData = {
-  provider: { kind: string; apiKey: string; modelId: string; baseUrl: string } | null;
+  provider: { api: string; apiKey: string; modelId: string; baseUrl: string } | null;
   maxConcurrency: number;
 };
 

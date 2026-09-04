@@ -15,6 +15,7 @@ import { loadForgeConfig, saveForgeConfig, validateProvider } from "./config-sto
 import { checkProvider } from "./provider-check.ts";
 import { checkRuntime } from "./runtime-readiness.ts";
 import { PiRuntime } from "../runtime/pi/index.ts";
+import { syncCustomModels, piAgentDir } from "./pi-models.ts";
 
 export type ForgeServerOptions = {
   port: number;
@@ -371,7 +372,7 @@ async function handleRequest(
     if (body.provider !== undefined) {
       const validated = validateProvider(body.provider);
       if (!validated) {
-        json(res, 400, { error: "invalid provider config: need kind, apiKey, modelId, baseUrl" });
+        json(res, 400, { error: "invalid provider config: need api, apiKey, modelId, baseUrl" });
         return;
       }
     }
@@ -406,16 +407,14 @@ async function handleRequest(
       return;
     }
 
-    const env: Record<string, string> = {};
-    if (provider.kind === "minimax") env.MINIMAX_API_KEY = provider.apiKey;
-    else if (provider.kind === "anthropic") env.ANTHROPIC_API_KEY = provider.apiKey;
-
-    const rt = new PiRuntime(forgeHome);
+    // Runtime check uses the custom path: declare the provider in Forge's
+    // models.json (apiKey lives there) and spawn Pi with --provider custom.
+    const providerName = await syncCustomModels(forgeHome, provider);
+    const rt = new PiRuntime(forgeHome, { piAgentDir: piAgentDir(forgeHome) });
     const runtimeResult = await checkRuntime(rt, {
       forgeHome,
-      provider: provider.kind,
+      provider: providerName,
       modelId: provider.modelId,
-      env,
     });
 
     const overall = runtimeResult.status === "FAIL" ? "FAIL" : "PASS";

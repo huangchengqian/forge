@@ -10,7 +10,6 @@ import {
 import type { ProviderEndpoint } from "./provider-api.ts";
 
 const EP: ProviderEndpoint = {
-  kind: "openai-compatible",
   apiKey: "k",
   modelId: "m",
   baseUrl: "https://example.com/v1",

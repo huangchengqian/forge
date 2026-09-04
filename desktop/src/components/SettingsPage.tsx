@@ -1,22 +1,36 @@
 import { useState } from "react";
 import type { ProviderCheckResult } from "../lib/desktop-client.ts";
 
-const PROVIDERS = [
-  { kind: "minimax", label: "MiniMax", baseUrl: "https://api.minimax.io/anthropic", defaultModel: "MiniMax-M3" },
-  { kind: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-6" },
-  { kind: "openai-compatible", label: "OpenAI Compatible", baseUrl: "", defaultModel: "" },
-] as const;
-
+// Protocol is the primary axis; vendors are presets that pin a baseUrl to one
+// protocol. Keep this table in sync with src/server/config-store.ts
+// PROVIDER_PRESETS (same ids, baseUrls, default models).
 const PROTOCOLS = [
+  { id: "anthropic-messages", label: "Anthropic (messages)" },
   { id: "openai-completions", label: "OpenAI (chat/completions)" },
   { id: "openai-responses", label: "OpenAI (responses)" },
-  { id: "anthropic-messages", label: "Anthropic (messages)" },
+] as const;
+
+const PRESETS = [
+  { id: "anthropic", label: "Anthropic", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-6" },
+  { id: "minimax", label: "MiniMax", api: "anthropic-messages", baseUrl: "https://api.minimax.io/anthropic", defaultModel: "MiniMax-M3" },
+  { id: "minimax-cn", label: "MiniMax (国内)", api: "anthropic-messages", baseUrl: "https://api.minimaxi.com/anthropic", defaultModel: "MiniMax-M3" },
+  { id: "kimi-coding", label: "Kimi (coding)", api: "anthropic-messages", baseUrl: "https://api.kimi.com/coding", defaultModel: "kimi-for-coding" },
+  { id: "openai", label: "OpenAI", api: "openai-responses", baseUrl: "https://api.openai.com/v1", defaultModel: "gpt-5" },
+  { id: "deepseek", label: "DeepSeek", api: "openai-completions", baseUrl: "https://api.deepseek.com", defaultModel: "deepseek-v4-pro" },
+  { id: "moonshotai", label: "Moonshot (Kimi)", api: "openai-completions", baseUrl: "https://api.moonshot.ai/v1", defaultModel: "kimi-k2.5" },
+  { id: "groq", label: "Groq", api: "openai-completions", baseUrl: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile" },
 ] as const;
 
 export type ForgeConfigData = {
-  provider: { kind: string; apiKey: string; modelId: string; baseUrl: string; api?: string } | null;
+  provider: { api: string; apiKey: string; modelId: string; baseUrl: string } | null;
   maxConcurrency: number;
 };
+
+function presetFor(config: ForgeConfigData["provider"]): string | null {
+  if (!config) return null;
+  const hit = PRESETS.find((p) => p.baseUrl === config.baseUrl);
+  return hit?.id ?? null;
+}
 
 export function SettingsPage({ config, onSave, onTest, testResult }: {
   config: ForgeConfigData;
@@ -24,29 +38,44 @@ export function SettingsPage({ config, onSave, onTest, testResult }: {
   onTest: (provider: Record<string, string>) => Promise<{ provider: ProviderCheckResult; runtime: ProviderCheckResult | null; status: string }>;
   testResult: { provider: ProviderCheckResult; runtime: ProviderCheckResult | null; status: string } | null;
 }) {
-  const [kind, setKind] = useState(config.provider?.kind ?? "anthropic");
+  const [api, setApi] = useState(config.provider?.api ?? "anthropic-messages");
+  const [presetId, setPresetId] = useState<string | null>(presetFor(config.provider));
   const [apiKey, setApiKey] = useState(config.provider?.apiKey ?? "");
   const [modelId, setModelId] = useState(config.provider?.modelId ?? "");
   const [baseUrl, setBaseUrl] = useState(config.provider?.baseUrl ?? "");
-  const [api, setApi] = useState(config.provider?.api ?? "openai-completions");
   const [maxConcurrency, setMaxConcurrency] = useState(config.maxConcurrency);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const selected = PROVIDERS.find((p) => p.kind === kind) ?? PROVIDERS[0]!;
+  const presetsForProtocol = PRESETS.filter((p) => p.api === api);
+
+  function choosePreset(id: string | null) {
+    setPresetId(id);
+    const preset = PRESETS.find((p) => p.id === id);
+    if (preset) {
+      setApi(preset.api);
+      setBaseUrl(preset.baseUrl);
+      if (!modelId || modelId === "custom") setModelId(preset.defaultModel);
+    }
+  }
+
+  function chooseProtocol(next: string) {
+    setApi(next);
+    // Changing protocol invalidates the vendor pin; keep whatever baseUrl the
+    // user already had (they may be re-pointing the same endpoint).
+    setPresetId(null);
+  }
+
+  function buildProvider(): { api: string; apiKey: string; modelId: string; baseUrl: string } {
+    return { api, apiKey, modelId: modelId.trim(), baseUrl: baseUrl.trim() };
+  }
 
   async function handleSave() {
     setSaving(true); setSaved(false); setSaveError(null);
     try {
-      const provider: { kind: string; apiKey: string; modelId: string; baseUrl: string; api?: string } = {
-        kind, apiKey,
-        modelId: modelId || selected.defaultModel,
-        baseUrl: kind === "openai-compatible" ? baseUrl : selected.baseUrl,
-      };
-      if (kind === "openai-compatible") provider.api = api;
-      await onSave({ provider, maxConcurrency });
+      await onSave({ provider: buildProvider(), maxConcurrency });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -58,12 +87,7 @@ export function SettingsPage({ config, onSave, onTest, testResult }: {
   async function handleTest() {
     setTesting(true); setSaveError(null);
     try {
-      const body: Record<string, string> = {
-        kind, apiKey, modelId: modelId || selected.defaultModel,
-        baseUrl: kind === "openai-compatible" ? baseUrl : selected.baseUrl,
-      };
-      if (kind === "openai-compatible") body.api = api;
-      const r = await onTest(body);
+      const r = await onTest(buildProvider());
       if (r.status === "FAIL") setSaveError("Readiness check failed — see checks below.");
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Readiness check failed");
@@ -76,34 +100,41 @@ export function SettingsPage({ config, onSave, onTest, testResult }: {
       <h2 style={h2}>Settings</h2>
 
       <div style={section}>
-        <div style={sectionTitle}>Provider</div>
-        {PROVIDERS.map((p) => (
-          <label key={p.kind} onClick={() => { setKind(p.kind); if (!modelId) setModelId(p.defaultModel); }}
-            style={{ ...radioRow, borderColor: kind === p.kind ? "var(--accent)" : "var(--border)" }}>
-            <input type="radio" checked={kind === p.kind} onChange={() => { setKind(p.kind); }} />
+        <div style={sectionTitle}>1 · Protocol</div>
+        {PROTOCOLS.map((p) => (
+          <label key={p.id} onClick={() => chooseProtocol(p.id)}
+            style={{ ...radioRow, borderColor: api === p.id ? "var(--accent)" : "var(--border)" }}>
+            <input type="radio" checked={api === p.id} onChange={() => chooseProtocol(p.id)} />
             <span style={{ fontWeight: 600 }}>{p.label}</span>
-            <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{p.baseUrl || "custom URL"}</span>
           </label>
         ))}
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>2 · Provider</div>
+        {presetsForProtocol.map((p) => (
+          <label key={p.id} onClick={() => choosePreset(p.id)}
+            style={{ ...radioRow, borderColor: presetId === p.id ? "var(--accent)" : "var(--border)" }}>
+            <input type="radio" checked={presetId === p.id} onChange={() => choosePreset(p.id)} />
+            <span style={{ fontWeight: 600 }}>{p.label}</span>
+            <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{p.baseUrl}</span>
+          </label>
+        ))}
+        <label onClick={() => choosePreset(null)}
+          style={{ ...radioRow, borderColor: presetId === null ? "var(--accent)" : "var(--border)" }}>
+          <input type="radio" checked={presetId === null} onChange={() => choosePreset(null)} />
+          <span style={{ fontWeight: 600 }}>Custom endpoint</span>
+          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>any {api} base URL</span>
+        </label>
+
+        <div style={lbl}>Base URL</div>
+        <input value={baseUrl} onChange={(e) => { setBaseUrl(e.target.value); setPresetId(null); }} placeholder="https://api.example.com" style={inp} />
         <div style={lbl}>API Key</div>
         <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." style={inp} />
         <div style={lbl}>Model ID</div>
         <input value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder="model-id" style={inp} />
-        {kind === "openai-compatible" && (
-          <>
-            <div style={lbl}>Base URL</div>
-            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" style={inp} />
-            <div style={lbl}>API protocol</div>
-            {PROTOCOLS.map((pr) => (
-              <label key={pr.id} onClick={() => setApi(pr.id)}
-                style={{ ...radioRow, borderColor: api === pr.id ? "var(--accent)" : "var(--border)" }}>
-                <input type="radio" checked={api === pr.id} onChange={() => setApi(pr.id)} />
-                <span style={{ fontSize: 12 }}>{pr.label}</span>
-              </label>
-            ))}
-          </>
-        )}
-        <button onClick={handleTest} disabled={!apiKey || testing} style={{ ...testBtn, marginTop: 8 }}>
+
+        <button onClick={handleTest} disabled={!apiKey || !modelId.trim() || !baseUrl.trim() || testing} style={{ ...testBtn, marginTop: 8 }}>
           {testing ? "Running readiness check…" : "Run Readiness Check"}
         </button>
         {testResult?.provider && (
@@ -139,7 +170,7 @@ export function SettingsPage({ config, onSave, onTest, testResult }: {
 
       {saveError && <div style={errBox}>{saveError}</div>}
 
-      <button onClick={handleSave} disabled={saving} style={saveBtn}>{saving ? "Saving…" : saved ? "✓ Saved" : "Save Settings"}</button>
+      <button onClick={handleSave} disabled={saving || !apiKey || !modelId.trim() || !baseUrl.trim()} style={saveBtn}>{saving ? "Saving…" : saved ? "✓ Saved" : "Save Settings"}</button>
     </div>
   );
 }

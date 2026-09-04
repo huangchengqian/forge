@@ -17,13 +17,12 @@ after(() => {
 });
 
 describe("syncCustomModels", () => {
-  test("openai-compatible writes models.json and returns the custom provider name", async () => {
+  test("openai-completions provider writes models.json and returns custom", async () => {
     const name = await syncCustomModels(HOME, {
-      kind: "openai-compatible",
+      api: "openai-completions",
       apiKey: "sk-test",
       modelId: "gpt-4o-mini",
       baseUrl: "https://gateway.example.com/v1",
-      api: "openai-completions",
     });
     assert.equal(name, CUSTOM_PROVIDER_NAME);
 
@@ -36,31 +35,29 @@ describe("syncCustomModels", () => {
     assert.equal(parsed.providers.custom.models[0].id, "gpt-4o-mini");
   });
 
-  test("anthropic protocol choice is honored", async () => {
+  test("anthropic-messages protocol is honored", async () => {
     const name = await syncCustomModels(HOME, {
-      kind: "openai-compatible",
-      apiKey: "sk-anthropic",
-      modelId: "claude-sonnet",
-      baseUrl: "https://gateway.example.com/anthropic",
       api: "anthropic-messages",
+      apiKey: "sk-anthropic",
+      modelId: "claude-sonnet-4-6",
+      baseUrl: "https://api.anthropic.com",
     });
     assert.equal(name, CUSTOM_PROVIDER_NAME);
     const parsed = JSON.parse(readFileSync(join(piAgentDir(HOME), "models.json"), "utf8"));
     assert.equal(parsed.providers.custom.api, "anthropic-messages");
+    assert.equal(parsed.providers.custom.baseUrl, "https://api.anthropic.com");
   });
 
-  test("built-in providers are not written to models.json", async () => {
-    const name = await syncCustomModels(HOME, {
-      kind: "anthropic",
-      apiKey: "sk",
-      modelId: "claude-opus-4-8",
-      baseUrl: "https://api.anthropic.com",
-    });
-    assert.equal(name, "anthropic");
-    // models.json may exist from prior cases; a fresh home should not get one.
+  test("every provider is written to models.json (no built-in fast path)", async () => {
     const fresh = join(TMP, "fresh-home");
     mkdirSync(fresh, { recursive: true });
-    await syncCustomModels(fresh, { kind: "minimax", apiKey: "k", modelId: "m", baseUrl: "https://x" });
-    assert.equal(existsSync(join(piAgentDir(fresh), "models.json")), false);
+    const name = await syncCustomModels(fresh, {
+      api: "anthropic-messages",
+      apiKey: "k",
+      modelId: "m",
+      baseUrl: "https://api.minimax.io/anthropic",
+    });
+    assert.equal(name, CUSTOM_PROVIDER_NAME);
+    assert.equal(existsSync(join(piAgentDir(fresh), "models.json")), true);
   });
 });

@@ -39,13 +39,11 @@ export function endpointFromConfig(cfg: ForgeConfig): ProviderEndpoint | null {
 }
 
 export function endpointFromProvider(p: ProviderConfig): ProviderEndpoint {
-  const api = p.api ?? (p.kind === "openai-compatible" ? "openai-completions" : undefined);
   return {
-    kind: p.kind,
+    api: p.api,
     apiKey: p.apiKey,
     modelId: p.modelId,
     baseUrl: p.baseUrl,
-    ...(api !== undefined ? { api } : {}),
   };
 }
 

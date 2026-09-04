@@ -22,7 +22,7 @@ import type { ProjectsRegistry, ProjectRecord } from "./projects.ts";
 import type { ApprovalHub, ApprovalRecord } from "./approval-hub.ts";
 import { captureGitHead } from "./undo.ts";
 import { appendRule, ruleFromApproval } from "../guard/policy.ts";
-import { syncCustomModels, piAgentDir } from "./pi-models.ts";
+import { syncCustomModels, piAgentDir, CUSTOM_PROVIDER_NAME } from "./pi-models.ts";
 import {
   classifyIntent,
   conversationReply,
@@ -39,10 +39,12 @@ export class CreateTaskError extends Error {
   }
 }
 
+// Maps a built-in Pi provider name (used only on the unconfigured headless
+// path) to its API key env var. Configured providers never hit this — their
+// key lives in Forge's models.json.
 const PROVIDER_ENV_VARS: Record<string, string[]> = {
   anthropic: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
   openai: ["OPENAI_API_KEY"],
-  "openai-compatible": ["OPENAI_API_KEY"],
   minimax: ["MINIMAX_API_KEY"],
   "minimax-cn": ["MINIMAX_CN_API_KEY"],
   openrouter: ["OPENROUTER_API_KEY"],
@@ -51,11 +53,6 @@ const PROVIDER_ENV_VARS: Record<string, string[]> = {
 
 export function providerEnvVar(provider: string): string | null {
   return PROVIDER_ENV_VARS[provider]?.[0] ?? null;
-}
-
-function apiKeyEnv(p: { kind: string; apiKey: string }): Record<string, string> {
-  const envVar = PROVIDER_ENV_VARS[p.kind]?.[0];
-  return envVar ? { [envVar]: p.apiKey } : {};
 }
 
 export type ServerRuntimeKind = "pi" | "fake";
@@ -138,9 +135,11 @@ export class TaskManager {
       return rt;
     }
     void modelId;
-    // Custom (openai-compatible) providers are declared in Forge's pi-agent
-    // models.json; Pi spawns with --provider custom and a Forge-owned agent dir.
-    const custom = await this.isCustomProviderConfigured();
+    // Any configured provider is declared in Forge's pi-agent models.json;
+    // Pi spawns with --provider custom and a Forge-owned agent dir. Only the
+    // unconfigured (headless CLI) path falls back to a built-in provider +
+    // env-injected key.
+    const custom = await this.hasConfiguredProvider();
     const options: import("../runtime/pi/index.ts").PiRuntimeOptions = {
       onApprovalRequest: (req) => {
         this.opts.approvalHub.record({
@@ -162,9 +161,9 @@ export class TaskManager {
     return new PiRuntime(this.opts.forgeHome, options);
   }
 
-  private async isCustomProviderConfigured(): Promise<boolean> {
+  private async hasConfiguredProvider(): Promise<boolean> {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
-    return cfg.provider?.kind === "openai-compatible";
+    return cfg.provider !== null;
   }
 
   // --- workspace resolution & locking ---
@@ -278,7 +277,7 @@ export class TaskManager {
       ? resolve(project.path)
       : join(this.opts.forgeHome, "tasks", taskId);
     const now = Date.now();
-    const provider = cfg.provider?.kind ?? this.opts.defaultProvider;
+    const provider = cfg.provider ? CUSTOM_PROVIDER_NAME : this.opts.defaultProvider;
     const modelId = cfg.provider?.modelId ?? this.opts.defaultModelId;
     const task: TaskSession = {
       id: taskId,
@@ -328,16 +327,18 @@ export class TaskManager {
     projectId?: string;
   }): Promise<{ taskId: string }> {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
-    let provider = input.provider ?? cfg.provider?.kind ?? this.opts.defaultProvider;
     const modelId = input.modelId ?? cfg.provider?.modelId ?? this.opts.defaultModelId;
-    if (provider === "openai-compatible") {
-      if (cfg.provider?.kind !== "openai-compatible") {
-        throw new CreateTaskError(400, "openai-compatible tasks require a provider configured in Settings");
-      }
+    // Configured provider → custom (apiKey lives in models.json); unconfigured
+    // → built-in provider with an env-injected key.
+    let provider: string;
+    let env: Record<string, string> = {};
+    if (cfg.provider) {
       provider = await syncCustomModels(this.opts.forgeHome, cfg.provider);
+    } else {
+      provider = input.provider ?? this.opts.defaultProvider;
+      env = resolveProviderEnv(provider) ?? {};
+      this.requireProviderEnv(provider, env);
     }
-    const env = { ...resolveProviderEnv(provider), ...(cfg.provider ? apiKeyEnv(cfg.provider) : {}) };
-    this.requireProviderEnv(provider, env);
 
     const project = await this.resolveProject(input.projectId);
     const taskId = newTaskId();
@@ -398,7 +399,7 @@ export class TaskManager {
     modelId?: string;
   }): Promise<PreflightResult> {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
-    const provider = input.provider ?? cfg.provider?.kind ?? this.opts.defaultProvider;
+    const provider = input.provider ?? (cfg.provider ? CUSTOM_PROVIDER_NAME : this.opts.defaultProvider);
     const modelId = input.modelId ?? cfg.provider?.modelId ?? this.opts.defaultModelId;
     const problems: string[] = [];
 
@@ -437,8 +438,8 @@ export class TaskManager {
       problems.push(`workspace is busy: task ${holder} is running in ${lockKey}`);
     }
 
-    const env = { ...resolveProviderEnv(provider), ...(cfg.provider ? apiKeyEnv(cfg.provider) : {}) };
-    const envConfigured = Object.keys(env).length > 0;
+    const env = cfg.provider ? {} : (resolveProviderEnv(provider) ?? {});
+    const envConfigured = cfg.provider !== null || Object.keys(env).length > 0;
     const envVar = providerEnvVar(provider);
     if (this.opts.runtimeKind === "pi" && !envConfigured) {
       problems.push(
@@ -495,7 +496,7 @@ export class TaskManager {
       };
     }
     const cfg = await loadForgeConfig(this.opts.forgeHome);
-    if (cfg.provider?.kind === "openai-compatible") {
+    if (cfg.provider) {
       await syncCustomModels(this.opts.forgeHome, cfg.provider);
     }
     const workspace = task.workspacePath?.trim()
@@ -510,7 +511,7 @@ export class TaskManager {
       return { resumed: false, message: err instanceof Error ? err.message : String(err) };
     }
 
-    const provider = task.model.provider;
+    const provider = cfg.provider ? CUSTOM_PROVIDER_NAME : task.model.provider;
     const modelId = task.model.modelId;
     let handle: Awaited<ReturnType<typeof attachTask>>;
     try {
@@ -520,7 +521,7 @@ export class TaskManager {
         taskId,
         provider,
         modelId,
-        env: { ...resolveProviderEnv(provider), ...(cfg.provider ? apiKeyEnv(cfg.provider) : {}) },
+        env: cfg.provider ? {} : (resolveProviderEnv(provider) ?? {}),
         eventBus: this.opts.bus,
         deadlineMs: undefined,
         policy: undefined,
