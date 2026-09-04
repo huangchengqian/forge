@@ -155,14 +155,48 @@ export class PiRuntime implements AgentRuntime {
 }
 
 export function lastAssistantText(events: readonly PiEvent[]): string {
-  let buf = "";
+  // Streaming text_delta events can arrive corrupted with some providers
+  // (CJK character reordering inside the runtime's streaming adapter —
+  // verified against real captures: deltas scrambled, final message clean).
+  // `message_end` carries the authoritative final message, so prefer it and
+  // fall back to delta accumulation only when no assistant message_end was
+  // observed (older runtimes, aborted turns).
+  let deltaBuf = "";
+  let finalText: string | null = null;
   for (const e of events) {
     if (e.type === "message_update") {
       const evt = e as { assistantMessageEvent?: { type?: string; delta?: string } };
       if (evt.assistantMessageEvent?.type === "text_delta") {
-        buf += evt.assistantMessageEvent.delta ?? "";
+        deltaBuf += evt.assistantMessageEvent.delta ?? "";
       }
+    } else if (e.type === "message_end") {
+      const text = assistantTextBlocks(e);
+      if (text !== null) finalText = text;
     }
   }
-  return buf;
+  return finalText ?? deltaBuf;
+}
+
+/**
+ * Extract the concatenated text-block content of an assistant message_end
+ * event. Returns null for non-assistant messages, missing content, or
+ * messages without any text (e.g. a tool-call-only turn) — callers keep the
+ * previously captured text in those cases.
+ */
+function assistantTextBlocks(e: PiEvent): string | null {
+  const msg = (e as { message?: unknown }).message as
+    | { role?: string; content?: unknown }
+    | undefined;
+  if (!msg || msg.role !== "assistant" || !Array.isArray(msg.content)) return null;
+  let text = "";
+  for (const block of msg.content) {
+    if (
+      block &&
+      typeof block === "object" &&
+      (block as { type?: string }).type === "text"
+    ) {
+      text += (block as { text?: string }).text ?? "";
+    }
+  }
+  return text.length > 0 ? text : null;
 }

@@ -247,6 +247,24 @@ export function replayConversationHistory(
       if (ame?.type === "text_delta" && typeof ame.delta === "string") {
         assistantBuf += ame.delta;
       }
+    } else if (pe.type === "message_end") {
+      // Authoritative final text replaces the accumulated deltas: with some
+      // providers the streamed deltas arrive with CJK character reordering
+      // while the final message is clean (see pi-adapter lastAssistantText).
+      const msg = (pe as { message?: { role?: string; content?: unknown } }).message;
+      if (msg?.role === "assistant" && Array.isArray(msg.content)) {
+        let text = "";
+        for (const block of msg.content) {
+          if (
+            block &&
+            typeof block === "object" &&
+            (block as { type?: string }).type === "text"
+          ) {
+            text += (block as { text?: string }).text ?? "";
+          }
+        }
+        if (text.length > 0) assistantBuf = text;
+      }
     } else if (pe.type === "turn_error") {
       flushAssistant();
     } else if (pe.type === "tool_call" || pe.type === "tool_execution_start") {

@@ -119,10 +119,13 @@ product direction in `ROADMAP.md`.
 
 ## Known issues
 
-- Streaming CJK corruption: with some providers, long Chinese text can arrive
-  with character-order corruption or a truncated tail. Forge mitigates what it
-  can (tolerant JSON parsing, truncation recovery) but the root cause lives in
-  the runtime's streaming adapter. `docs/19-PI-UPSTREAM-ISSUES.md` tracks it.
+- Streaming CJK corruption (mitigated): with some providers the streamed
+  `text_delta` events arrive with character reordering, but the runtime's
+  final `message_end` message is clean. Forge now replaces accumulated deltas
+  with the authoritative final text at every consumption point (turn result,
+  conversation history, desktop view), so corrupted streaming self-corrects
+  when a message completes. The root cause still lives in the runtime's
+  streaming adapter. `docs/19-PI-UPSTREAM-ISSUES.md` tracks it.
 - Real-task success rate varies a lot by model; weak agentic models produce
   plans they cannot finish. Verification will catch it, but the task fails.
 

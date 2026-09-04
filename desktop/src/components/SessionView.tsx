@@ -63,6 +63,16 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
         flushTool();
         const ame = pe.assistantMessageEvent as { type?: string; delta?: string } | undefined;
         if (ame?.type === "text_delta" && typeof ame.delta === "string") agentBuf += ame.delta;
+      } else if (pe.type === "message_end") {
+        // Authoritative final text replaces the accumulated deltas: some
+        // providers stream CJK text with character reordering while the
+        // final message is clean, so the visible text self-corrects here.
+        flushTool();
+        const msg = pe.message as { role?: string; content?: Array<{ type?: string; text?: string }> } | undefined;
+        if (msg?.role === "assistant" && Array.isArray(msg.content)) {
+          const text = msg.content.filter((b) => b?.type === "text").map((b) => b.text ?? "").join("");
+          if (text.length > 0) agentBuf = text;
+        }
       } else if (pe.type === "tool_call") {
         flushAgent();
         pendingTool = { kind: "tool", name: String(pe.toolName ?? "tool"), summary: humanTool(pe.toolName, pe.input), detail: toolDetail(pe.toolName, pe.input), status: "pending" };

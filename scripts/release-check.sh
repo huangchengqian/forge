@@ -40,6 +40,7 @@ check "undo tests"            "cd $ROOT && node --import tsx --test src/server/u
 check "pi-models tests"       "cd $ROOT && node --import tsx --test src/server/pi-models.test.ts"
 check "task-manager tests"    "cd $ROOT && node --import tsx --test src/server/task-manager.test.ts"
 check "intent-router tests"   "cd $ROOT && node --import tsx --test src/server/intent-router.test.ts"
+check "pi-adapter tests"     "cd $ROOT && node --import tsx --test src/runtime/pi/pi-adapter.test.ts"
 
 echo ""
 echo "--- Integration ---"

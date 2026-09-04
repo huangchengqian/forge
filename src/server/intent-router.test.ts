@@ -154,6 +154,38 @@ describe("replayConversationHistory", () => {
     ];
     assert.deepEqual(replayConversationHistory(events), [{ role: "assistant", content: "hi" }]);
   });
+
+  test("message_end authoritative text replaces corrupted CJK deltas", () => {
+    // Real-world shape (task 4959y): deltas arrive with character reordering
+    // ("to the user. greet") while the final message is clean.
+    const events = [
+      { type: "AGENT_EVENT", payload: { piEvent: { type: "user_message", text: "你好" } } },
+      { type: "AGENT_EVENT", payload: { piEvent: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "你好！我是 to the user. greet" } } } },
+      { type: "AGENT_EVENT", payload: { piEvent: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "你好！我是 to greet the user." }] } } } },
+    ];
+    const out = replayConversationHistory(events);
+    assert.deepEqual(out, [
+      { role: "user", content: "你好" },
+      { role: "assistant", content: "你好！我是 to greet the user." },
+    ]);
+  });
+
+  test("message_end for user messages and empty text is ignored", () => {
+    const events = [
+      { type: "AGENT_EVENT", payload: { piEvent: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "干净回复" } } } },
+      { type: "AGENT_EVENT", payload: { piEvent: { type: "message_end", message: { role: "user", content: [{ type: "text", text: "prompt echo" }] } } } },
+      { type: "AGENT_EVENT", payload: { piEvent: { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", toolCallId: "t1", toolName: "bash", input: {} }] } } } },
+    ];
+    const out = replayConversationHistory(events);
+    assert.deepEqual(out, [{ role: "assistant", content: "干净回复" }]);
+  });
+
+  test("deltas still used when no message_end arrives", () => {
+    const events = [
+      { type: "AGENT_EVENT", payload: { piEvent: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "仅 delta" } } } },
+    ];
+    assert.deepEqual(replayConversationHistory(events), [{ role: "assistant", content: "仅 delta" }]);
+  });
 });
 
 describe("conversationReply", () => {
