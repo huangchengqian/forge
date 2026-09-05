@@ -16,7 +16,12 @@ declare global {
   }
 }
 
-const cfg = window.__FORGE_CONFIG__ ?? { baseUrl: "http://127.0.0.1:5300", token: "" };
+const cfg = window.__FORGE_CONFIG__ ?? {
+  baseUrl: "http://127.0.0.1:5300",
+  // Browser dev (vite): paste the sidecar token into localStorage, e.g.
+  // localStorage.setItem("forge-token", "<token from ~/.forge/server.json>")
+  token: localStorage.getItem("forge-token") ?? "",
+};
 
 export function App() {
   const store = useDesktop();
