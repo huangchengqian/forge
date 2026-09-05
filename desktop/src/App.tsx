@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useDesktop } from "./lib/useDesktopStore.ts";
-import { initClient, getConfig, saveConfig, testConnection, deleteMemory as deleteMemoryApi } from "./lib/desktop-client.ts";
+import { initClient, getConfig, saveConfig, testConnection, switchSubscription, deleteMemory as deleteMemoryApi } from "./lib/desktop-client.ts";
 import type { ProviderCheckResult, ForgeConfigData, ProviderConfig } from "./lib/desktop-client.ts";
 import { Sidebar } from "./components/Sidebar.tsx";
 import type { ProjectRecord } from "./components/ProjectsPage.tsx";
@@ -152,7 +152,9 @@ export function App() {
           )
         ) : store.state.selectedTaskId && selectedTask ? (
           <SessionView task={selectedTask} memory={store.state.memory} liveEvents={store.state.liveEvents}
-            onSend={async (msg) => { await store.sendMessage(selectedTask.id, msg); }} />
+            providers={configData?.providers ?? []}
+            onSend={async (msg) => { await store.sendMessage(selectedTask.id, msg); }}
+            onSwitchModel={async (providerId) => { await switchSubscription(selectedTask.id, providerId); await store.refreshTasks(); }} />
         ) : (
           <EmptyWorkspace focusSignal={composerFocus} activeProjectName={projects.find((p) => p.id === activeProjectId)?.name ?? null}
             providers={configData?.providers ?? []}

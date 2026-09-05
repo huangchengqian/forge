@@ -92,6 +92,15 @@ export async function deleteSession(taskId: string): Promise<void> {
   if (!r.ok) throw new Error(`DELETE /tasks/${taskId} → ${r.status}`);
 }
 
+export async function switchSubscription(taskId: string, providerId: string): Promise<void> {
+  const r = await fetch(`${cfg!.baseUrl}/tasks/${taskId}/subscription`, {
+    method: "POST",
+    headers: { ...headers(), "content-type": "application/json" },
+    body: JSON.stringify({ providerId }),
+  });
+  if (!r.ok) throw new Error(`POST subscription → ${r.status}`);
+}
+
 export type ProviderConfig = {
   id: string;
   api: string;

@@ -4,6 +4,7 @@ import type {
   AgentRuntime,
   CreateSessionOptions,
   PromptOptions,
+  RuntimeModel,
   RuntimeSession,
   TurnResult,
 } from "../interface.ts";
@@ -138,6 +139,11 @@ export class PiRuntime implements AgentRuntime {
       text: lastAssistantText(result.events),
       error: undefined,
     };
+  }
+
+  async setModel(session: RuntimeSession, model: RuntimeModel): Promise<void> {
+    const pi = session as PiRuntimeSession;
+    await pi.client.setModel(model.provider, model.modelId);
   }
 
   async abort(session: RuntimeSession): Promise<void> {

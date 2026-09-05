@@ -31,6 +31,7 @@ export type TaskSession = {
   plan: Plan | null;
   currentStepId: string | null;
   observations: readonly Observation[];
+  model: { provider: string; modelId: string };
   fixCount: number;
   createdAt: number;
   updatedAt: number;

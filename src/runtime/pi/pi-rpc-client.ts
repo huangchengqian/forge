@@ -182,6 +182,16 @@ export class PiRpcClient {
     return await this.sendAsync("get_state");
   }
 
+  /**
+   * Switch the session's model mid-flight. Pi's `set_model` resolves against
+   * its available-model snapshot (all providers declared in models.json), so
+   * this works across vendors/protocols without rebuilding the session.
+   */
+  async setModel(provider: string, modelId: string): Promise<void> {
+    const res = await this.sendAsync("set_model", { provider, modelId });
+    if (!res.success) throw new Error(res.error ?? "set_model failed");
+  }
+
   /** Respond to a pending extension UI request (guard approval). */
   respondExtensionUI(
     id: string,

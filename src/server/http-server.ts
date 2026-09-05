@@ -221,6 +221,18 @@ async function handleRequest(
     return;
   }
 
+  if (req.method === "POST" && parts[0] === "tasks" && parts[2] === "subscription" && parts.length === 3) {
+    const body = await readBody(req);
+    const providerId = typeof body.providerId === "string" ? body.providerId : "";
+    if (!providerId) {
+      json(res, 400, { error: "providerId is required" });
+      return;
+    }
+    const result = await manager.switchModel(parts[1]!, providerId);
+    json(res, result.ok ? 200 : 409, result);
+    return;
+  }
+
   if (req.method === "DELETE" && parts[0] === "tasks" && parts.length === 2) {
     const result = await manager.deleteTask(parts[1]!);
     json(res, result.ok ? 200 : 409, result);
@@ -424,12 +436,13 @@ async function handleRequest(
     }
 
     // Runtime check uses the custom path: declare the provider in Forge's
-    // models.json (apiKey lives there) and spawn Pi with --provider custom.
-    const providerName = await syncCustomModels(forgeHome, provider);
+    // models.json (apiKey lives there) and spawn Pi with the subscription id
+    // as its provider name.
+    await syncCustomModels(forgeHome, [provider]);
     const rt = new PiRuntime(forgeHome, { piAgentDir: piAgentDir(forgeHome) });
     const runtimeResult = await checkRuntime(rt, {
       forgeHome,
-      provider: providerName,
+      provider: provider.id,
       modelId: provider.modelId,
     });
 

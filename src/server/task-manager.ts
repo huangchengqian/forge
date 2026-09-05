@@ -22,7 +22,7 @@ import type { ProjectsRegistry, ProjectRecord } from "./projects.ts";
 import type { ApprovalHub, ApprovalRecord } from "./approval-hub.ts";
 import { captureGitHead } from "./undo.ts";
 import { appendRule, ruleFromApproval } from "../guard/policy.ts";
-import { syncCustomModels, piAgentDir, CUSTOM_PROVIDER_NAME } from "./pi-models.ts";
+import { syncCustomModels, piAgentDir, providerName } from "./pi-models.ts";
 import {
   classifyIntent,
   conversationReply,
@@ -279,7 +279,7 @@ export class TaskManager {
       : join(this.opts.forgeHome, "tasks", taskId);
     const now = Date.now();
     const subscription = resolveProvider(cfg);
-    const provider = subscription ? CUSTOM_PROVIDER_NAME : this.opts.defaultProvider;
+    const provider = subscription ? providerName(subscription) : this.opts.defaultProvider;
     const modelId = subscription?.modelId ?? this.opts.defaultModelId;
     const task: TaskSession = {
       id: taskId,
@@ -332,12 +332,14 @@ export class TaskManager {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
     const subscription = resolveProvider(cfg, input.providerId);
     const modelId = input.modelId ?? subscription?.modelId ?? this.opts.defaultModelId;
-    // Configured subscription → custom (apiKey lives in models.json);
-    // unconfigured → built-in provider with an env-injected key.
+    // Configured subscription → declared in models.json (apiKey lives there),
+    // spawned as `--provider <subscription id>`; unconfigured → built-in
+    // provider with an env-injected key.
     let provider: string;
     let env: Record<string, string> = {};
     if (subscription) {
-      provider = await syncCustomModels(this.opts.forgeHome, subscription);
+      await syncCustomModels(this.opts.forgeHome, cfg.providers);
+      provider = providerName(subscription);
     } else {
       provider = input.provider ?? this.opts.defaultProvider;
       env = resolveProviderEnv(provider) ?? {};
@@ -405,7 +407,7 @@ export class TaskManager {
   }): Promise<PreflightResult> {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
     const subscription = resolveProvider(cfg, input.providerId);
-    const provider = input.provider ?? (subscription ? CUSTOM_PROVIDER_NAME : this.opts.defaultProvider);
+    const provider = input.provider ?? (subscription ? providerName(subscription) : this.opts.defaultProvider);
     const modelId = input.modelId ?? subscription?.modelId ?? this.opts.defaultModelId;
     const problems: string[] = [];
 
@@ -504,7 +506,7 @@ export class TaskManager {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
     const subscription = resolveProvider(cfg);
     if (subscription) {
-      await syncCustomModels(this.opts.forgeHome, subscription);
+      await syncCustomModels(this.opts.forgeHome, cfg.providers);
     }
     const workspace = task.workspacePath?.trim()
       ? resolve(task.workspacePath)
@@ -518,7 +520,7 @@ export class TaskManager {
       return { resumed: false, message: err instanceof Error ? err.message : String(err) };
     }
 
-    const provider = subscription ? CUSTOM_PROVIDER_NAME : task.model.provider;
+    const provider = subscription ? providerName(subscription) : task.model.provider;
     const modelId = subscription ? subscription.modelId : task.model.modelId;
     let handle: Awaited<ReturnType<typeof attachTask>>;
     try {
@@ -714,6 +716,37 @@ export class TaskManager {
       await appendEvent(taskId, "AGENT_EVENT", { piEvent: { type: "turn_error", error: err instanceof Error ? err.message : String(err) } });
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
+    return { ok: true, message: "ok" };
+  }
+
+  /**
+   * Mid-session model switch (steering). Resolves the subscription, refreshes
+   * models.json so the running Pi session's snapshot includes it, and calls
+   * runtime.setModel — conversation history and workspace are preserved.
+   */
+  async switchModel(taskId: string, providerId: string): Promise<{ ok: boolean; message: string }> {
+    const entry = this.idle.get(taskId) ?? this.active.get(taskId);
+    if (!entry) return { ok: false, message: "no active or idle session for this task" };
+    const cfg = await loadForgeConfig(this.opts.forgeHome);
+    const subscription = resolveProvider(cfg, providerId);
+    if (!subscription) return { ok: false, message: "no such subscription" };
+    await syncCustomModels(this.opts.forgeHome, cfg.providers);
+    try {
+      await entry.runtime.setModel?.(entry.session, {
+        provider: providerName(subscription),
+        modelId: subscription.modelId,
+      });
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+    const task = await loadTask(taskId);
+    if (task) {
+      task.model = { provider: providerName(subscription), modelId: subscription.modelId };
+      await saveTask(task);
+    }
+    await appendEvent(taskId, "AGENT_EVENT", {
+      piEvent: { type: "model_switch", provider: subscription.id, modelId: subscription.modelId },
+    });
     return { ok: true, message: "ok" };
   }
 

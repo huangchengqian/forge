@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TaskSession, MemoryItem, Plan } from "../shared/types.ts";
-import type { EventEnvelope, DiffResult } from "../lib/desktop-client.ts";
+import type { EventEnvelope, DiffResult, ProviderConfig } from "../lib/desktop-client.ts";
 import { fetchDiff, undoTask } from "../lib/desktop-client.ts";
 
 type UsedMemoryEntry = { type: string; content: string; confidence: number };
@@ -142,11 +142,27 @@ function toolResult(result: unknown): string {
   return JSON.stringify(result).slice(0, 1000);
 }
 
-export function SessionView({ task, memory, liveEvents, onSend }: {
+function modelLabel(baseUrl: string): string {
+  const known: Record<string, string> = {
+    "https://api.anthropic.com": "Anthropic",
+    "https://api.minimax.io/anthropic": "MiniMax",
+    "https://api.minimaxi.com/anthropic": "MiniMax CN",
+    "https://api.kimi.com/coding": "Kimi",
+    "https://api.openai.com/v1": "OpenAI",
+    "https://api.deepseek.com": "DeepSeek",
+    "https://api.moonshot.ai/v1": "Moonshot",
+    "https://api.groq.com/openai/v1": "Groq",
+  };
+  return known[baseUrl] ?? "Custom";
+}
+
+export function SessionView({ task, memory, liveEvents, providers, onSend, onSwitchModel }: {
   task: TaskSession;
   memory: readonly MemoryItem[];
   liveEvents: readonly EventEnvelope[];
+  providers: readonly ProviderConfig[];
   onSend?: (message: string) => Promise<void>;
+  onSwitchModel?: (providerId: string) => Promise<void>;
 }) {
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [undoing, setUndoing] = useState(false);
@@ -156,6 +172,7 @@ export function SessionView({ task, memory, liveEvents, onSend }: {
   const [sendError, setSendError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [planOpen, setPlanOpen] = useState(true);
+  const [switching, setSwitching] = useState(false);
   const streamEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -191,6 +208,14 @@ export function SessionView({ task, memory, liveEvents, onSend }: {
     setSending(false);
   }
 
+  async function handleSwitch(providerId: string) {
+    if (!onSwitchModel || switching || providerId === task.model.provider) return;
+    setSwitching(true); setSendError(null);
+    try { await onSwitchModel(providerId); }
+    catch (err) { setSendError(err instanceof Error ? err.message : String(err)); }
+    setSwitching(false);
+  }
+
   const items = useMemo(() => toChat(liveEvents), [liveEvents]);
 
   function toggle(i: number) {
@@ -206,6 +231,18 @@ export function SessionView({ task, memory, liveEvents, onSend }: {
       <div style={head}>
         <span style={headTitle}>{task.goal || "(untitled)"}</span>
         <span style={{ ...dot, background: stateColor(task.state) }} title={task.state} />
+        {providers.length > 0 && (
+          <select
+            value={task.model.provider ?? ""}
+            onChange={(e) => void handleSwitch(e.target.value)}
+            disabled={switching || !onSwitchModel}
+            title={switching ? "Switching…" : "Switch model for this session"}
+            style={{ marginLeft: "auto", padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", backgroundColor: "var(--bg-secondary)", color: "var(--text)", fontSize: 12, maxWidth: 240 }}>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>{modelLabel(p.baseUrl)} · {p.modelId}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 28px" }}>
