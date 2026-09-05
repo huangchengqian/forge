@@ -17,7 +17,7 @@ import { appendEvent, eventsDir, readEvents } from "../core/persistence/event-lo
 import type { TaskSession } from "../core/types/task-session.ts";
 import type { RuntimeSupervisor } from "./runtime-supervisor.ts";
 import { TaskRecoveryService } from "../recovery/index.ts";
-import { loadForgeConfig } from "./config-store.ts";
+import { loadForgeConfig, resolveProvider } from "./config-store.ts";
 import type { ProjectsRegistry, ProjectRecord } from "./projects.ts";
 import type { ApprovalHub, ApprovalRecord } from "./approval-hub.ts";
 import { captureGitHead } from "./undo.ts";
@@ -163,7 +163,7 @@ export class TaskManager {
 
   private async hasConfiguredProvider(): Promise<boolean> {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
-    return cfg.provider !== null;
+    return resolveProvider(cfg) !== null;
   }
 
   // --- workspace resolution & locking ---
@@ -240,6 +240,7 @@ export class TaskManager {
     goal: string;
     provider?: string;
     modelId?: string;
+    providerId?: string;
     maxConcurrency?: number;
     projectId?: string;
   }): Promise<{ taskId: string }> {
@@ -277,8 +278,9 @@ export class TaskManager {
       ? resolve(project.path)
       : join(this.opts.forgeHome, "tasks", taskId);
     const now = Date.now();
-    const provider = cfg.provider ? CUSTOM_PROVIDER_NAME : this.opts.defaultProvider;
-    const modelId = cfg.provider?.modelId ?? this.opts.defaultModelId;
+    const subscription = resolveProvider(cfg);
+    const provider = subscription ? CUSTOM_PROVIDER_NAME : this.opts.defaultProvider;
+    const modelId = subscription?.modelId ?? this.opts.defaultModelId;
     const task: TaskSession = {
       id: taskId,
       goal: input.goal.trim(),
@@ -323,17 +325,19 @@ export class TaskManager {
     goal: string;
     provider?: string;
     modelId?: string;
+    providerId?: string;
     maxConcurrency?: number;
     projectId?: string;
   }): Promise<{ taskId: string }> {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
-    const modelId = input.modelId ?? cfg.provider?.modelId ?? this.opts.defaultModelId;
-    // Configured provider → custom (apiKey lives in models.json); unconfigured
-    // → built-in provider with an env-injected key.
+    const subscription = resolveProvider(cfg, input.providerId);
+    const modelId = input.modelId ?? subscription?.modelId ?? this.opts.defaultModelId;
+    // Configured subscription → custom (apiKey lives in models.json);
+    // unconfigured → built-in provider with an env-injected key.
     let provider: string;
     let env: Record<string, string> = {};
-    if (cfg.provider) {
-      provider = await syncCustomModels(this.opts.forgeHome, cfg.provider);
+    if (subscription) {
+      provider = await syncCustomModels(this.opts.forgeHome, subscription);
     } else {
       provider = input.provider ?? this.opts.defaultProvider;
       env = resolveProviderEnv(provider) ?? {};
@@ -397,10 +401,12 @@ export class TaskManager {
     projectId?: string;
     provider?: string;
     modelId?: string;
+    providerId?: string;
   }): Promise<PreflightResult> {
     const cfg = await loadForgeConfig(this.opts.forgeHome);
-    const provider = input.provider ?? (cfg.provider ? CUSTOM_PROVIDER_NAME : this.opts.defaultProvider);
-    const modelId = input.modelId ?? cfg.provider?.modelId ?? this.opts.defaultModelId;
+    const subscription = resolveProvider(cfg, input.providerId);
+    const provider = input.provider ?? (subscription ? CUSTOM_PROVIDER_NAME : this.opts.defaultProvider);
+    const modelId = input.modelId ?? subscription?.modelId ?? this.opts.defaultModelId;
     const problems: string[] = [];
 
     let project: ProjectRecord | null = null;
@@ -438,8 +444,8 @@ export class TaskManager {
       problems.push(`workspace is busy: task ${holder} is running in ${lockKey}`);
     }
 
-    const env = cfg.provider ? {} : (resolveProviderEnv(provider) ?? {});
-    const envConfigured = cfg.provider !== null || Object.keys(env).length > 0;
+    const env = subscription ? {} : (resolveProviderEnv(provider) ?? {});
+    const envConfigured = subscription !== null || Object.keys(env).length > 0;
     const envVar = providerEnvVar(provider);
     if (this.opts.runtimeKind === "pi" && !envConfigured) {
       problems.push(
@@ -496,8 +502,9 @@ export class TaskManager {
       };
     }
     const cfg = await loadForgeConfig(this.opts.forgeHome);
-    if (cfg.provider) {
-      await syncCustomModels(this.opts.forgeHome, cfg.provider);
+    const subscription = resolveProvider(cfg);
+    if (subscription) {
+      await syncCustomModels(this.opts.forgeHome, subscription);
     }
     const workspace = task.workspacePath?.trim()
       ? resolve(task.workspacePath)
@@ -511,8 +518,8 @@ export class TaskManager {
       return { resumed: false, message: err instanceof Error ? err.message : String(err) };
     }
 
-    const provider = cfg.provider ? CUSTOM_PROVIDER_NAME : task.model.provider;
-    const modelId = task.model.modelId;
+    const provider = subscription ? CUSTOM_PROVIDER_NAME : task.model.provider;
+    const modelId = subscription ? subscription.modelId : task.model.modelId;
     let handle: Awaited<ReturnType<typeof attachTask>>;
     try {
       const runtime = await this.buildRuntime(provider, modelId, task.goal);
@@ -521,7 +528,7 @@ export class TaskManager {
         taskId,
         provider,
         modelId,
-        env: cfg.provider ? {} : (resolveProviderEnv(provider) ?? {}),
+        env: subscription ? {} : (resolveProviderEnv(provider) ?? {}),
         eventBus: this.opts.bus,
         deadlineMs: undefined,
         policy: undefined,

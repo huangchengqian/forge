@@ -25,7 +25,7 @@ function createStore() {
     });
   }
 
-  async function createTaskAction(input: { goal: string; provider?: string; modelId?: string; maxConcurrency?: number }): Promise<string> {
+  async function createTaskAction(input: { goal: string; provider?: string; modelId?: string; providerId?: string; maxConcurrency?: number }): Promise<string> {
     const { taskId } = await createTask(input);
     refresh();
     return taskId;
@@ -68,7 +68,7 @@ function createStore() {
     async refreshTasks() {
       refresh();
     },
-    async createTask(input: { goal: string; provider?: string; modelId?: string; maxConcurrency?: number }) {
+    async createTask(input: { goal: string; provider?: string; modelId?: string; providerId?: string; maxConcurrency?: number }) {
       return createTaskAction(input);
     },
     async sendMessage(taskId: string, message: string) {

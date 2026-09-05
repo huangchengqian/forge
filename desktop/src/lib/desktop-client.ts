@@ -92,11 +92,25 @@ export async function deleteSession(taskId: string): Promise<void> {
   if (!r.ok) throw new Error(`DELETE /tasks/${taskId} → ${r.status}`);
 }
 
-export async function getConfig(): Promise<{ provider: unknown | null }> {
+export type ProviderConfig = {
+  id: string;
+  api: string;
+  apiKey: string;
+  modelId: string;
+  baseUrl: string;
+};
+
+export type ForgeConfigData = {
+  providers: ProviderConfig[];
+  defaultProviderId: string | null;
+  maxConcurrency: number;
+};
+
+export async function getConfig(): Promise<ForgeConfigData> {
   return getJson("/config");
 }
 
-export async function saveConfig(config: Record<string, unknown>): Promise<void> {
+export async function saveConfig(config: Partial<ForgeConfigData>): Promise<void> {
   const r = await fetch(`${cfg!.baseUrl}/config`, {
     method: "PUT", headers: { ...headers(), "content-type": "application/json" },
     body: JSON.stringify(config),
@@ -133,7 +147,7 @@ export async function testConnection(provider: Record<string, string>): Promise<
   }>;
 }
 
-export async function createTask(input: { goal: string; provider?: string; modelId?: string; maxConcurrency?: number }): Promise<{ taskId: string; state: string }> {
+export async function createTask(input: { goal: string; provider?: string; modelId?: string; providerId?: string; maxConcurrency?: number }): Promise<{ taskId: string; state: string }> {
   const r = await fetch(`${cfg!.baseUrl}/tasks`, {
     method: "POST",
     headers: { ...headers(), "content-type": "application/json" },

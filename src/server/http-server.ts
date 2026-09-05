@@ -11,7 +11,7 @@ import { ProjectsRegistry } from "./projects.ts";
 import { ApprovalHub } from "./approval-hub.ts";
 import { computeDiff, restoreUndo } from "./undo.ts";
 import { addMemory, listMemory, deleteMemory, retrieve, extractKeywords } from "../memory/index.ts";
-import { loadForgeConfig, saveForgeConfig, validateProvider } from "./config-store.ts";
+import { loadForgeConfig, saveForgeConfig, validateProvider, type ForgeConfig, type ProviderConfig } from "./config-store.ts";
 import { checkProvider } from "./provider-check.ts";
 import { checkRuntime } from "./runtime-readiness.ts";
 import { PiRuntime } from "../runtime/pi/index.ts";
@@ -134,10 +134,11 @@ async function handleRequest(
 
   if (req.method === "POST" && url.pathname === "/tasks/preflight") {
     const body = await readBody(req);
-    const preflightInput: { projectId?: string; provider?: string; modelId?: string } = {};
+    const preflightInput: { projectId?: string; provider?: string; modelId?: string; providerId?: string } = {};
     if (typeof body.projectId === "string") preflightInput.projectId = body.projectId;
     if (typeof body.provider === "string") preflightInput.provider = body.provider;
     if (typeof body.modelId === "string") preflightInput.modelId = body.modelId;
+    if (typeof body.providerId === "string") preflightInput.providerId = body.providerId;
     const result = await manager.preflight(preflightInput);
     json(res, 200, result);
     return;
@@ -150,9 +151,10 @@ async function handleRequest(
       json(res, 400, { error: "goal is required" });
       return;
     }
-    const createInput: { goal: string; provider?: string; modelId?: string; maxConcurrency?: number; projectId?: string } = { goal };
+    const createInput: { goal: string; provider?: string; modelId?: string; providerId?: string; maxConcurrency?: number; projectId?: string } = { goal };
     if (typeof body.provider === "string") createInput.provider = body.provider;
     if (typeof body.modelId === "string") createInput.modelId = body.modelId;
+    if (typeof body.providerId === "string") createInput.providerId = body.providerId;
     if (typeof body.maxConcurrency === "number") createInput.maxConcurrency = body.maxConcurrency;
     if (typeof body.projectId === "string") createInput.projectId = body.projectId;
     try {
@@ -369,17 +371,31 @@ async function handleRequest(
 
   if (req.method === "PUT" && url.pathname === "/config") {
     const body = await readBody(req);
-    if (body.provider !== undefined) {
-      const validated = validateProvider(body.provider);
-      if (!validated) {
-        json(res, 400, { error: "invalid provider config: need api, apiKey, modelId, baseUrl" });
+    const current = await loadForgeConfig(forgeHome);
+    // Full-config save: `providers[]` + `defaultProviderId` + maxConcurrency.
+    let providers: ProviderConfig[];
+    if (Array.isArray(body.providers)) {
+      const validated = (body.providers as unknown[])
+        .map((p) => validateProvider(p))
+        .filter((p): p is ProviderConfig => p !== null);
+      if (validated.length !== (body.providers as unknown[]).length) {
+        json(res, 400, { error: "invalid provider config: each entry needs api, apiKey, modelId, baseUrl" });
         return;
       }
+      providers = validated;
+    } else {
+      providers = current.providers;
     }
-    const current = await loadForgeConfig(forgeHome);
-    const next = {
-      version: 1 as const,
-      provider: body.provider !== undefined ? validateProvider(body.provider) : current.provider,
+    const defaultProviderId =
+      typeof body.defaultProviderId === "string"
+        ? body.defaultProviderId
+        : current.defaultProviderId;
+    const next: ForgeConfig = {
+      version: 2,
+      providers,
+      defaultProviderId: providers.some((p) => p.id === defaultProviderId)
+        ? defaultProviderId
+        : (providers[0]?.id ?? null),
       maxConcurrency: typeof body.maxConcurrency === "number" ? body.maxConcurrency : current.maxConcurrency,
     };
     await saveForgeConfig(forgeHome, next);

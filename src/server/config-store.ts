@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 
 /**
  * The wire protocol is the primary axis of provider configuration. It
@@ -18,7 +19,14 @@ export const PROVIDER_APIS: readonly ProviderApi[] = [
   "openai-responses",
 ];
 
+/**
+ * One configured model subscription. Users typically hold several — a cheap
+ * model for routine work and a strong one for hard tasks, across multiple
+ * vendors — so Forge stores a list, not a single provider.
+ */
 export type ProviderConfig = {
+  /** Stable identifier used to reference this subscription from tasks. */
+  id: string;
   api: ProviderApi;
   apiKey: string;
   modelId: string;
@@ -52,30 +60,70 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 ];
 
 export type ForgeConfig = {
-  version: 1;
-  provider: ProviderConfig | null;
+  version: 2;
+  providers: ProviderConfig[];
+  defaultProviderId: string | null;
   maxConcurrency: number;
 };
 
 const DEFAULT_CONFIG: ForgeConfig = {
-  version: 1,
-  provider: null,
+  version: 2,
+  providers: [],
+  defaultProviderId: null,
   maxConcurrency: 2,
 };
+
+export function newProviderId(): string {
+  return randomUUID();
+}
 
 export function configPath(forgeHome: string): string {
   return resolve(join(forgeHome, "forge-config.json"));
 }
 
+/**
+ * Resolve the subscription to use. Explicit providerId wins; otherwise the
+ * configured default; otherwise the first entry; otherwise null (unconfigured
+ * headless path).
+ */
+export function resolveProvider(
+  cfg: ForgeConfig,
+  providerId?: string,
+): ProviderConfig | null {
+  const byId = (id: string | null | undefined) =>
+    cfg.providers.find((p) => p.id === id) ?? null;
+  return byId(providerId) ?? byId(cfg.defaultProviderId) ?? (cfg.providers[0] ?? null);
+}
+
 export async function loadForgeConfig(forgeHome: string): Promise<ForgeConfig> {
   try {
     const raw = await readFile(configPath(forgeHome), "utf8");
-    const parsed = JSON.parse(raw) as Partial<ForgeConfig>;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object") return { ...DEFAULT_CONFIG };
+    const maxConcurrency = typeof parsed.maxConcurrency === "number" ? parsed.maxConcurrency : 2;
+
+    // v2: `providers[]`. Validate each entry; drop malformed ones.
+    if (Array.isArray(parsed.providers)) {
+      const providers = (parsed.providers as unknown[])
+        .map((p) => validateProvider(p))
+        .filter((p): p is ProviderConfig => p !== null);
+      const defaultId = typeof parsed.defaultProviderId === "string" ? parsed.defaultProviderId : null;
+      return {
+        version: 2,
+        providers,
+        defaultProviderId: providers.some((p) => p.id === defaultId) ? defaultId : (providers[0]?.id ?? null),
+        maxConcurrency,
+      };
+    }
+
+    // v1: single `provider`. Migrate to a one-entry list.
+    const legacy = coerceProvider(parsed.provider);
+    const providers = legacy ? [legacy] : [];
     return {
-      version: 1,
-      provider: coerceProvider(parsed.provider),
-      maxConcurrency: typeof parsed.maxConcurrency === "number" ? parsed.maxConcurrency : 2,
+      version: 2,
+      providers,
+      defaultProviderId: legacy?.id ?? null,
+      maxConcurrency,
     };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { ...DEFAULT_CONFIG };
@@ -93,7 +141,7 @@ export async function saveForgeConfig(forgeHome: string, config: ForgeConfig): P
 
 export async function isConfigured(forgeHome: string): Promise<boolean> {
   const cfg = await loadForgeConfig(forgeHome);
-  return cfg.provider !== null && cfg.provider.apiKey.length > 0;
+  return cfg.providers.some((p) => p.apiKey.length > 0);
 }
 
 export function validateProvider(p: unknown): ProviderConfig | null {
@@ -104,11 +152,12 @@ export function validateProvider(p: unknown): ProviderConfig | null {
   if (typeof obj.apiKey !== "string" || !obj.apiKey.trim()) return null;
   if (typeof obj.modelId !== "string" || !obj.modelId.trim()) return null;
   if (typeof obj.baseUrl !== "string" || !obj.baseUrl.trim()) return null;
-  return { api, apiKey: obj.apiKey, modelId: obj.modelId, baseUrl: obj.baseUrl };
+  const id = typeof obj.id === "string" && obj.id.trim() ? obj.id : newProviderId();
+  return { id, api, apiKey: obj.apiKey, modelId: obj.modelId, baseUrl: obj.baseUrl };
 }
 
 /**
- * Coerce a persisted provider into the current shape. The pre-protocol
+ * Coerce a persisted v1 provider into the current shape. The pre-protocol
  * format used a `kind` axis ("minimax" | "anthropic" | "openai-compatible")
  * with an optional `api`. Both "anthropic" and "minimax" are
  * anthropic-messages vendors, and "openai-compatible" carried the protocol

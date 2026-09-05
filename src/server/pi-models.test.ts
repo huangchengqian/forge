@@ -19,6 +19,7 @@ after(() => {
 describe("syncCustomModels", () => {
   test("openai-completions provider writes models.json and returns custom", async () => {
     const name = await syncCustomModels(HOME, {
+      id: "sub-1",
       api: "openai-completions",
       apiKey: "sk-test",
       modelId: "gpt-4o-mini",
@@ -37,6 +38,7 @@ describe("syncCustomModels", () => {
 
   test("anthropic-messages protocol is honored", async () => {
     const name = await syncCustomModels(HOME, {
+      id: "sub-2",
       api: "anthropic-messages",
       apiKey: "sk-anthropic",
       modelId: "claude-sonnet-4-6",
@@ -52,6 +54,7 @@ describe("syncCustomModels", () => {
     const fresh = join(TMP, "fresh-home");
     mkdirSync(fresh, { recursive: true });
     const name = await syncCustomModels(fresh, {
+      id: "sub-3",
       api: "anthropic-messages",
       apiKey: "k",
       modelId: "m",

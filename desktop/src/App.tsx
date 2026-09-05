@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useDesktop } from "./lib/useDesktopStore.ts";
 import { initClient, getConfig, saveConfig, testConnection, deleteMemory as deleteMemoryApi } from "./lib/desktop-client.ts";
-import type { ProviderCheckResult } from "./lib/desktop-client.ts";
+import type { ProviderCheckResult, ForgeConfigData, ProviderConfig } from "./lib/desktop-client.ts";
 import { Sidebar } from "./components/Sidebar.tsx";
 import type { ProjectRecord } from "./components/ProjectsPage.tsx";
 import { SettingsPage } from "./components/SettingsPage.tsx";
@@ -18,14 +18,9 @@ declare global {
 
 const cfg = window.__FORGE_CONFIG__ ?? { baseUrl: "http://127.0.0.1:5300", token: "" };
 
-type ConfigData = {
-  provider: { api: string; apiKey: string; modelId: string; baseUrl: string } | null;
-  maxConcurrency: number;
-};
-
 export function App() {
   const store = useDesktop();
-  const [configData, setConfigData] = useState<ConfigData | null>(null);
+  const [configData, setConfigData] = useState<ForgeConfigData | null>(null);
   const [projects, setProjects] = useState<readonly ProjectRecord[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -47,11 +42,11 @@ export function App() {
         getConfig(),
         getJson<{ projects: readonly ProjectRecord[]; activeProjectId: string | null }>("/projects"),
       ]);
-      setConfigData(cfgData as ConfigData);
+      setConfigData(cfgData);
       setProjects(projList.projects);
       setActiveProjectId(projList.activeProjectId);
     } catch {
-      setConfigData({ provider: null, maxConcurrency: 2 });
+      setConfigData({ providers: [], defaultProviderId: null, maxConcurrency: 2 });
     } finally {
       setLoading(false);
     }
@@ -150,7 +145,6 @@ export function App() {
               <SettingsPage
                 key={JSON.stringify(configData)}
                 config={configData}
-                testResult={null}
                 onSave={async (partial) => { await saveConfig(partial); await loadAll(); }}
                 onTest={async (provider) => { initClient(cfg); return testConnection(provider); }}
               />
@@ -161,8 +155,10 @@ export function App() {
             onSend={async (msg) => { await store.sendMessage(selectedTask.id, msg); }} />
         ) : (
           <EmptyWorkspace focusSignal={composerFocus} activeProjectName={projects.find((p) => p.id === activeProjectId)?.name ?? null}
-            onSubmit={async (goal) => {
-              const taskId = await store.createTask({ goal });
+            providers={configData?.providers ?? []}
+            defaultProviderId={configData?.defaultProviderId ?? null}
+            onSubmit={async (goal, providerId) => {
+              const taskId = await store.createTask({ goal, ...(providerId ? { providerId } : {}) });
               store.select(taskId);
             }} />
         )}
@@ -177,11 +173,14 @@ export function App() {
   );
 }
 
-function EmptyWorkspace({ focusSignal, activeProjectName, onSubmit }: {
+function EmptyWorkspace({ focusSignal, activeProjectName, providers, defaultProviderId, onSubmit }: {
   focusSignal: number;
   activeProjectName: string | null;
-  onSubmit: (goal: string) => Promise<void>;
+  providers: ProviderConfig[];
+  defaultProviderId: string | null;
+  onSubmit: (goal: string, providerId?: string) => Promise<void>;
 }) {
+  const [providerId, setProviderId] = useState<string | null>(defaultProviderId ?? providers[0]?.id ?? null);
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ width: "100%", maxWidth: 640 }}>
@@ -191,10 +190,34 @@ function EmptyWorkspace({ focusSignal, activeProjectName, onSubmit }: {
         <div style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center" as const, marginBottom: 24 }}>
           {activeProjectName ? `Working in ${activeProjectName}` : "No project selected — sessions will be unassigned"}
         </div>
-        <SessionComposer onSubmit={onSubmit} focusSignal={focusSignal} />
+        {providers.length > 0 && (
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+            <select value={providerId ?? ""} onChange={(e) => setProviderId(e.target.value || null)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)", backgroundColor: "var(--bg-secondary)", color: "var(--text)", fontSize: 13, maxWidth: 280 }}>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>{modelLabel(p.baseUrl)} · {p.modelId}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <SessionComposer onSubmit={(goal) => onSubmit(goal, providerId ?? undefined)} focusSignal={focusSignal} />
       </div>
     </div>
   );
+}
+
+function modelLabel(baseUrl: string): string {
+  const known: Record<string, string> = {
+    "https://api.anthropic.com": "Anthropic",
+    "https://api.minimax.io/anthropic": "MiniMax",
+    "https://api.minimaxi.com/anthropic": "MiniMax CN",
+    "https://api.kimi.com/coding": "Kimi",
+    "https://api.openai.com/v1": "OpenAI",
+    "https://api.deepseek.com": "DeepSeek",
+    "https://api.moonshot.ai/v1": "Moonshot",
+    "https://api.groq.com/openai/v1": "Groq",
+  };
+  return known[baseUrl] ?? "Custom";
 }
 
 async function getJson<T>(path: string): Promise<T> {

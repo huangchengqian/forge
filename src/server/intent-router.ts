@@ -1,5 +1,6 @@
 import { callProvider, extractResponseText, type ProviderEndpoint } from "./provider-api.ts";
 import type { ForgeConfig, ProviderConfig } from "./config-store.ts";
+import { resolveProvider } from "./config-store.ts";
 
 /**
  * Phase 9.7 Intent Router.
@@ -33,7 +34,7 @@ export const FALLBACK_REPLY =
 
 /** Build a provider endpoint from the saved config (mirrors provider-check semantics). */
 export function endpointFromConfig(cfg: ForgeConfig): ProviderEndpoint | null {
-  const p = cfg.provider;
+  const p = resolveProvider(cfg);
   if (!p) return null;
   return endpointFromProvider(p);
 }
