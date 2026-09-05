@@ -1,5 +1,7 @@
 # Forge
 
+> [简体中文](README.zh-CN.md) | English
+
 An open-source, desktop-first **engineering agent**. Give it a goal, and Forge
 plans the work, executes it through an agent runtime, verifies the result with
 real commands, and shows exactly what changed — with you in control.
@@ -103,15 +105,16 @@ npx tsx src/cli/serve.ts --port 5300 --runtime pi
 npx tsx src/cli/run.ts run "create a TypeScript utility module with tests"
 ```
 
-Configure a provider in the app's Settings (kind, API key, base URL, model), or
-by writing `~/.forge/forge-config.json`.
+Manage model subscriptions in the app's Settings (add multiple vendors/models,
+set a default, switch per task or per session), or write
+`~/.forge/forge-config.json` directly.
 
 ## Development
 
 ```bash
 npm run typecheck              # server + core typecheck
 cd desktop && npm run typecheck
-bash scripts/release-check.sh  # typecheck + unit tests + integration + fresh-install (23 checks)
+bash scripts/release-check.sh  # typecheck + unit tests + integration + fresh-install (25 checks)
 ```
 
 Design notes live in `docs/`, engineering rules in `AGENTS.md`, and the
