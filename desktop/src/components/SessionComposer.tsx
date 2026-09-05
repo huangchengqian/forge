@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
-export function SessionComposer({ onSubmit, focusSignal }: {
+export function SessionComposer({ onSubmit, focusSignal, leftSlot }: {
   onSubmit: (goal: string) => Promise<void>;
   focusSignal?: number;
+  /** Optional control rendered at the left of the bottom row (e.g. model picker). */
+  leftSlot?: ReactNode;
 }) {
   const [goal, setGoal] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -29,39 +32,24 @@ export function SessionComposer({ onSubmit, focusSignal }: {
 
   return (
     <div>
-      <div style={inputWrap}>
+      <div className="composer-box">
         <textarea
           ref={inputRef}
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void handleSubmit(); }}
-          placeholder="Ask Forge to build, fix, or change something…"
-          style={ta}
+          placeholder="Ask Forge to build, fix, or change something…  (⌘Enter to run)"
+          className="composer-ta"
           rows={3}
         />
       </div>
-      <div style={row}>
-        <button onClick={handleSubmit} disabled={!goal.trim() || submitting} style={runBtn}>
+      <div className="composer-actions" style={{ marginTop: 10 }}>
+        {leftSlot}
+        {error && <span style={{ color: "var(--red)", fontSize: 12, alignSelf: "center" }}>{error}</span>}
+        <button onClick={handleSubmit} disabled={!goal.trim() || submitting} className="btn btn-primary btn-small" style={{ marginLeft: "auto" }}>
           {submitting ? "Starting…" : "Run"}
         </button>
-        {error && <span style={err}>{error}</span>}
       </div>
     </div>
   );
 }
-
-const inputWrap = {
-  border: "1px solid var(--border-strong)", borderRadius: 12, padding: "6px 12px", backgroundColor: "var(--bg-secondary)",
-  transition: "border-color 0.15s",
-};
-const ta = {
-  width: "100%", padding: "8px 2px", border: "none", backgroundColor: "transparent",
-  color: "var(--text)", fontSize: 15, lineHeight: 1.6, resize: "none" as const,
-  boxSizing: "border-box" as const, outline: "none", fontFamily: "inherit",
-};
-const row = { display: "flex", alignItems: "center", gap: 12, marginTop: 12 };
-const runBtn = {
-  padding: "8px 22px", borderRadius: 8, border: "none", backgroundColor: "var(--accent)",
-  color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer",
-};
-const err = { color: "var(--red)", fontSize: 13 };

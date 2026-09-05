@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { streamUrl, fetchTaskList, fetchMemory, createTask, sendMessage, deleteSession as deleteSessionApi } from "./desktop-client.ts";
+import { streamUrl, fetchTaskList, fetchMemory, createTask, sendMessage, deleteSession as deleteSessionApi, renameTask } from "./desktop-client.ts";
 import type { EventEnvelope } from "./desktop-client.ts";
 import type { TaskSession, MemoryItem } from "../shared/types.ts";
 
@@ -80,6 +80,10 @@ function createStore() {
         if (closeStream) { closeStream(); closeStream = null; }
         state = { ...state, selectedTaskId: null, liveEvents: [] };
       }
+      refresh();
+    },
+    async renameSession(taskId: string, goal: string) {
+      await renameTask(taskId, goal);
       refresh();
     },
     connectStream(taskId: string): () => void {

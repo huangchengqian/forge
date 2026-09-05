@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TaskSession, MemoryItem, Plan } from "../shared/types.ts";
 import type { EventEnvelope, DiffResult, ProviderConfig } from "../lib/desktop-client.ts";
-import { fetchDiff, undoTask } from "../lib/desktop-client.ts";
+import { fetchDiff, undoTask, cancelTask } from "../lib/desktop-client.ts";
+import { isTaskTerminal } from "./ApprovalCenter.tsx";
+import { Markdown } from "./Markdown.tsx";
+import { DiffView } from "./DiffView.tsx";
 
 type UsedMemoryEntry = { type: string; content: string; confidence: number };
 
@@ -116,6 +119,35 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
   return items;
 }
 
+type Usage = { input: number; output: number; cost: number };
+
+/** Aggregate token usage across assistant messages in the event stream. */
+function sumUsage(events: readonly EventEnvelope[]): Usage {
+  const total: Usage = { input: 0, output: 0, cost: 0 };
+  for (const e of events) {
+    if (e.type !== "AGENT_EVENT") continue;
+    const pe = e.payload.piEvent as Record<string, any> | undefined;
+    if (pe?.type !== "message_end") continue;
+    const msg = pe.message as { role?: string; usage?: Record<string, any> } | undefined;
+    if (msg?.role !== "assistant" || !msg.usage || typeof msg.usage !== "object") continue;
+    const u = msg.usage;
+    total.input += num(u.input) + num(u.cacheRead) + num(u.cacheWrite);
+    total.output += num(u.output);
+    total.cost += num(u.cost?.total);
+  }
+  return total;
+}
+
+function num(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 function humanTool(name: string | undefined, input: unknown): string {
   const o = (input ?? {}) as Record<string, unknown>;
   switch (name) {
@@ -173,7 +205,9 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [planOpen, setPlanOpen] = useState(true);
   const [switching, setSwitching] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const streamEndRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -208,6 +242,14 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
     setSending(false);
   }
 
+  async function handleStop() {
+    if (stopping) return;
+    setStopping(true); setSendError(null);
+    try { await cancelTask(task.id); }
+    catch (err) { setSendError(err instanceof Error ? err.message : String(err)); }
+    setStopping(false);
+  }
+
   async function handleSwitch(providerId: string) {
     if (!onSwitchModel || switching || providerId === task.model.provider) return;
     setSwitching(true); setSendError(null);
@@ -216,7 +258,23 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
     setSwitching(false);
   }
 
+  /** Auto-grow the reply textarea with content (1..10 rows). */
+  function autoGrow() {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 220)}px`;
+  }
+
   const items = useMemo(() => toChat(liveEvents), [liveEvents]);
+  const usage = useMemo(() => sumUsage(liveEvents), [liveEvents]);
+  const streaming = useMemo(() => {
+    const last = liveEvents[liveEvents.length - 1];
+    if (!last || last.type !== "AGENT_EVENT") return false;
+    const pe = last.payload.piEvent as Record<string, any> | undefined;
+    if (pe?.type !== "message_update") return false;
+    return (pe.assistantMessageEvent as { type?: string } | undefined)?.type === "text_delta";
+  }, [liveEvents]);
 
   function toggle(i: number) {
     setExpanded((prev) => {
@@ -226,39 +284,39 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
     });
   }
 
+  const active = !isTaskTerminal(task.state);
+
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div style={head}>
-        <span style={headTitle}>{task.goal || "(untitled)"}</span>
-        <span style={{ ...dot, background: stateColor(task.state) }} title={task.state} />
-        {providers.length > 0 && (
-          <select
-            value={task.model.provider ?? ""}
-            onChange={(e) => void handleSwitch(e.target.value)}
-            disabled={switching || !onSwitchModel}
-            title={switching ? "Switching…" : "Switch model for this session"}
-            style={{ marginLeft: "auto", padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", backgroundColor: "var(--bg-secondary)", color: "var(--text)", fontSize: 12, maxWidth: 240 }}>
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>{modelLabel(p.baseUrl)} · {p.modelId}</option>
-            ))}
-          </select>
+      <div className="session-head">
+        <span className="session-head-title">{task.goal || "(untitled)"}</span>
+        <span className="chip" title={task.state}>
+          <span className="dot" style={{ background: stateColor(task.state) }} />
+          {stateLabel(task.state)}
+        </span>
+        {usage.input + usage.output > 0 && (
+          <span className="chip" title={`${fmtTokens(usage.input)} input · ${fmtTokens(usage.output)} output tokens`}>
+            {fmtTokens(usage.input)} → {fmtTokens(usage.output)} tok
+            {usage.cost > 0.0005 && ` · $${usage.cost.toFixed(2)}`}
+          </span>
         )}
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 28px" }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", paddingBottom: 24 }}>
+        <div style={{ maxWidth: 760, margin: "0 auto", paddingBottom: 24 }}>
           {/* User message */}
-          <div style={userBlock}>
-            <div style={roleLabel}>User</div>
-            <div style={userText}>{task.goal}</div>
+          <div style={{ marginBottom: 20, marginTop: 18 }}>
+            <div className="role-label">User</div>
+            <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{task.goal}</div>
           </div>
 
           {/* Plan (collapsible) */}
           {task.plan && task.plan.steps.length > 0 && (
-            <div style={planCard}>
-              <div onClick={() => setPlanOpen((v) => !v)} style={planHeader}>
-                <span style={{ color: "var(--text-muted)", fontSize: 12 }}>{planOpen ? "▾" : "▸"}</span>
-                <span style={planTitle}>Plan</span>
+            <div className="card">
+              <div onClick={() => setPlanOpen((v) => !v)} className="collapsible-header">
+                <span className="caret">{planOpen ? "▾" : "▸"}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Plan</span>
+                <PlanProgress plan={task.plan} />
               </div>
               {planOpen && (
                 <div style={{ marginTop: 6 }}>
@@ -276,10 +334,14 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
           {/* Agent activity */}
           {items.map((it, i) => {
             if (it.kind === "agent") {
+              const isLast = streaming && i === items.length - 1;
               return (
-                <div key={i} style={agentBlock}>
-                  <div style={roleLabel}>Agent</div>
-                  <div style={agentText}>{it.text}</div>
+                <div key={i} style={{ margin: "18px 0" }}>
+                  <div className="role-label">Agent</div>
+                  <div style={isLast ? { display: "inline" } : undefined}>
+                    <Markdown text={it.text} />
+                    {isLast && <span className="stream-caret" />}
+                  </div>
                 </div>
               );
             }
@@ -292,16 +354,16 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
             if (it.kind === "tool") {
               const open = expanded.has(i);
               return (
-                <div key={i} onClick={() => toggle(i)} style={toolRow}>
-                  <span style={{ color: "var(--text-muted)", fontSize: 12, width: 16 }}>{open ? "▾" : "▸"}</span>
+                <div key={i} onClick={() => toggle(i)} className="tool-row">
+                  <span className="caret">{open ? "▾" : "▸"}</span>
                   <span style={{ ...toolTag, background: toolColor(it.status) }}>{toolIcon(it.status)}</span>
-                  <span style={toolSummary}>{it.summary}</span>
+                  <span className="tool-summary">{it.summary}</span>
                   {open && <pre style={toolDetailPre}>{it.detail}</pre>}
                 </div>
               );
             }
             return (
-              <div key={i} style={statusRow}>
+              <div key={i} style={{ padding: "3px 0", fontSize: 13 }}>
                 <span style={{ color: toneColor(it.tone) }}>{it.text}</span>
               </div>
             );
@@ -312,18 +374,20 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
 
           {/* Diff (only when changes exist) */}
           {diff && diff.kind !== "none" && (
-            <div style={diffBlock}>
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: 16, paddingTop: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Changed files</span>
-                <button onClick={handleUndo} disabled={undoing} style={undoBtn}>{undoing ? "Restoring…" : "Undo"}</button>
+                <button onClick={handleUndo} disabled={undoing} className="btn btn-ghost btn-small">{undoing ? "Restoring…" : "Undo"}</button>
               </div>
               {undoMsg && <div style={{ fontSize: 12, color: undoMsg.startsWith("Undone") ? "var(--green)" : "var(--red)", marginBottom: 6 }}>{undoMsg}</div>}
               {diff.kind === "git" ? (
-                <pre style={diffPre}>{diff.diff.slice(0, 4000)}{diff.diff.length > 4000 ? "\n… (truncated)" : ""}</pre>
+                diff.diff.length > 200_000
+                  ? <pre className="tool-detail">{diff.diff.slice(0, 200_000)}{"\n… (truncated)"}</pre>
+                  : <DiffView diff={diff.diff} />
               ) : (
                 <div>
                   {diff.files.map((f) => (
-                    <div key={f.path} style={{ fontSize: 12, padding: "2px 0", color: "var(--text-secondary)", fontFamily: "monospace" }}>
+                    <div key={f.path} style={{ fontSize: 12, padding: "2px 0", color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
                       <span style={{ color: "var(--green)", marginRight: 6 }}>{f.backup ? "M" : "+"}</span>{f.path}
                     </div>
                   ))}
@@ -338,23 +402,69 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
 
       {onSend && (
         <div style={{ borderTop: "1px solid var(--border)", padding: "12px 28px 16px" }}>
-          <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", gap: 10 }}>
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void handleSend(); }}
-              placeholder="Reply / continue…"
-              style={composerInput}
-            />
-            <button onClick={handleSend} disabled={!draft.trim() || sending} style={sendBtn}>
-              {sending ? "…" : "Send"}
-            </button>
+          <div style={{ maxWidth: 760, margin: "0 auto" }}>
+            <div className="composer-box">
+              <textarea
+                ref={taRef}
+                value={draft}
+                onChange={(e) => { setDraft(e.target.value); autoGrow(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSend();
+                  }
+                }}
+                placeholder="Reply / continue…  (Enter to send, Shift+Enter for newline)"
+                rows={1}
+                className="composer-ta"
+              />
+              <div className="composer-actions">
+                {providers.length > 0 && (
+                  <select
+                    value={task.model.provider ?? ""}
+                    onChange={(e) => void handleSwitch(e.target.value)}
+                    disabled={switching || !onSwitchModel}
+                    title={switching ? "Switching…" : "Switch model for this session"}
+                    className="composer-model-select">
+                    {providers.map((p) => (
+                      <option key={p.id} value={p.id}>{modelLabel(p.baseUrl)} · {p.modelId}</option>
+                    ))}
+                  </select>
+                )}
+                {active && (
+                  <button onClick={handleStop} disabled={stopping} className="btn btn-danger btn-small" title="Stop the running task">
+                    {stopping ? "Stopping…" : "■ Stop"}
+                  </button>
+                )}
+                <button onClick={handleSend} disabled={!draft.trim() || sending} className="btn btn-primary btn-small" style={{ marginLeft: "auto" }}>
+                  {sending ? "…" : "Send"}
+                </button>
+              </div>
+            </div>
+            {sendError && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}>{sendError}</div>}
           </div>
-          {sendError && <div style={{ maxWidth: 720, margin: "8px auto 0", color: "var(--red)", fontSize: 12 }}>{sendError}</div>}
         </div>
       )}
     </div>
   );
+}
+
+function PlanProgress({ plan }: { plan: Plan }) {
+  const done = plan.steps.filter((s) => s.status === "verified" || s.status === "cancelled").length;
+  return (
+    <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-muted)" }}>
+      {done}/{plan.steps.length} steps
+    </span>
+  );
+}
+
+function stateLabel(s: string): string {
+  const map: Record<string, string> = {
+    READY: "Ready", UNDERSTAND: "Understanding", PLAN: "Planning", EXECUTE: "Executing",
+    OBSERVE: "Verifying", FIX: "Fixing", EVALUATE: "Evaluating", COMPLETE: "Completed",
+    REVIEW_REQUIRED: "Review required", FAILED: "Failed",
+  };
+  return map[s] ?? s;
 }
 
 function stateColor(s: string): string {
@@ -365,14 +475,13 @@ function stateColor(s: string): string {
 function ThinkCard({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div style={thinkCard}>
-      <div onClick={() => setOpen((v) => !v)} style={thinkHeader}>
-        <span style={{ color: "var(--text-muted)", fontSize: 12, width: 16 }}>{open ? "▾" : "▸"}</span>
-        <span style={{ color: "var(--text-muted)", fontSize: 12.5 }}>🤔</span>
-        <span style={thinkTitle}>{open ? "Thought" : "Thinking…"}</span>
+    <div style={{ margin: "6px 0", border: "1px dashed var(--border)", borderRadius: 6, padding: "6px 10px" }}>
+      <div onClick={() => setOpen((v) => !v)} className="collapsible-header">
+        <span className="caret">{open ? "▾" : "▸"}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: 12, fontStyle: "italic" }}>{open ? "Thought" : "Thinking…"}</span>
       </div>
       {open && (
-        <div style={thinkBody}>
+        <div style={{ marginTop: 4, paddingLeft: 20 }}>
           {text.split("\n").filter(Boolean).map((line, i) => (
             <div key={i} style={{ padding: "2px 0", color: "var(--text-muted)", fontSize: 12.5, lineHeight: 1.6 }}>{line}</div>
           ))}
@@ -383,13 +492,14 @@ function ThinkCard({ text }: { text: string }) {
 }
 
 /** Light-weight "✦ Used N memories" hint, expandable in place. */
-function MemoryHint({ memories }: { memories: UsedMemoryEntry[] }) {  const [open, setOpen] = useState(false);
+function MemoryHint({ memories }: { memories: UsedMemoryEntry[] }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div style={memCard}>
-      <div onClick={() => setOpen((v) => !v)} style={memHeader}>
-        <span style={{ color: "var(--accent)", fontSize: 12, width: 16 }}>{open ? "▾" : "▸"}</span>
+    <div style={{ margin: "10px 0" }}>
+      <div onClick={() => setOpen((v) => !v)} className="collapsible-header">
+        <span className="caret" style={{ color: "var(--accent)" }}>{open ? "▾" : "▸"}</span>
         <span style={{ color: "var(--accent)", fontSize: 12.5, marginRight: 6 }}>✦</span>
-        <span style={memTitle}>
+        <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
           Used {memories.length} {memories.length === 1 ? "memory" : "memories"}
         </span>
       </div>
@@ -397,7 +507,7 @@ function MemoryHint({ memories }: { memories: UsedMemoryEntry[] }) {  const [ope
         <div style={{ marginTop: 6 }}>
           {memories.map((m, i) => (
             <div key={i} style={{ padding: "4px 0", fontSize: 12.5, lineHeight: 1.5, display: "flex", gap: 8 }}>
-              <span style={{ ...memType, color: memoryTypeColor(m.type) }}>{m.type}</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, flexShrink: 0, fontWeight: 600, color: memoryTypeColor(m.type) }}>{m.type}</span>
               <span style={{ color: "var(--text-secondary)", flex: 1 }}>{m.content}</span>
               <span style={{ color: "var(--text-muted)", fontSize: 11, flexShrink: 0 }}>conf {m.confidence}</span>
             </div>
@@ -427,32 +537,5 @@ function toneColor(t: string): string {
   return t === "ok" ? "var(--green)" : t === "bad" ? "var(--red)" : "var(--text-muted)";
 }
 
-const head = { display: "flex", alignItems: "center", gap: 10, padding: "14px 28px", borderBottom: "1px solid var(--border)" };
-const headTitle = { flex: 1, fontSize: 15, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const };
-const dot = { width: 8, height: 8, borderRadius: 99, display: "inline-block", flexShrink: 0 };
-const roleLabel = { fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase" as const, letterSpacing: "0.5px" };
-const userBlock = { marginBottom: 20 };
-const userText = { fontSize: 15, color: "var(--text)", lineHeight: 1.6, whiteSpace: "pre-wrap" as const };
-const agentBlock = { margin: "18px 0" };
-const agentText = { fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.7, whiteSpace: "pre-wrap" as const };
-const planCard = { backgroundColor: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", margin: "12px 0" };
-const planHeader = { display: "flex", alignItems: "center", gap: 8, cursor: "pointer" };
-const planTitle = { fontSize: 13, fontWeight: 600, color: "var(--text)" };
-const memCard = { margin: "10px 0" };
-const memHeader = { display: "flex", alignItems: "center", gap: 4, cursor: "pointer", padding: "2px 0" };
-const memTitle = { fontSize: 12.5, color: "var(--text-muted)" };
-const memType = { fontFamily: "monospace", fontSize: 11, flexShrink: 0, fontWeight: 600 };
-const thinkCard = { margin: "6px 0", backgroundColor: "var(--bg)", border: "1px dashed var(--border)", borderRadius: 6, padding: "6px 10px" };
-const thinkHeader = { display: "flex", alignItems: "center", gap: 4, cursor: "pointer", padding: "2px 0" };
-const thinkTitle = { fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" };
-const thinkBody = { marginTop: 4, paddingLeft: 20 };
-const toolRow = { display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 6, cursor: "pointer", flexWrap: "wrap" as const };
 const toolTag = { width: 16, height: 16, borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#fff", flexShrink: 0 };
-const toolSummary = { fontSize: 13, color: "var(--text-secondary)", fontFamily: "monospace" };
-const toolDetailPre = { width: "100%", backgroundColor: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: 10, fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap" as const, wordBreak: "break-all" as const, margin: "6px 0 0 24px" };
-const statusRow = { padding: "3px 0", fontSize: 13 };
-const diffBlock = { borderTop: "1px solid var(--border)", marginTop: 16, paddingTop: 14 };
-const undoBtn = { padding: "4px 12px", borderRadius: 6, border: "1px solid var(--border-strong)", backgroundColor: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 12 };
-const diffPre = { backgroundColor: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: 10, fontSize: 11.5, color: "var(--text-muted)", overflow: "auto" as const, maxHeight: 260, whiteSpace: "pre-wrap" as const, wordBreak: "break-all" as const, margin: 0 };
-const composerInput = { flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-strong)", backgroundColor: "var(--bg-secondary)", color: "var(--text)", fontSize: 14, outline: "none" };
-const sendBtn = { padding: "8px 20px", borderRadius: 8, border: "none", backgroundColor: "var(--accent)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" };
+const toolDetailPre = { width: "100%", backgroundColor: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: 10, fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)", whiteSpace: "pre-wrap" as const, wordBreak: "break-all" as const, margin: "6px 0 0 24px" };

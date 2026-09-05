@@ -666,6 +666,19 @@ export class TaskManager {
     return { ok: true, message: "deleted" };
   }
 
+  /** Rename a session (updates its displayed goal). Refused while running. */
+  async rename(taskId: string, goal: string): Promise<{ ok: boolean; message: string }> {
+    if (this.active.has(taskId)) {
+      return { ok: false, message: "session is running — cancel it first" };
+    }
+    const t = await loadTask(taskId);
+    if (!t) return { ok: false, message: "no such task" };
+    t.goal = goal;
+    t.updatedAt = Date.now();
+    await saveTask(t);
+    return { ok: true, message: "renamed" };
+  }
+
   whenSettled(taskId: string): Promise<TaskSession> | null {
     return this.active.get(taskId)?.runPromise ?? null;
   }

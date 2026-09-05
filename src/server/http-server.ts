@@ -233,6 +233,18 @@ async function handleRequest(
     return;
   }
 
+  if (req.method === "POST" && parts[0] === "tasks" && parts[2] === "rename" && parts.length === 3) {
+    const body = await readBody(req);
+    const goal = typeof body.goal === "string" ? body.goal.trim() : "";
+    if (!goal) {
+      json(res, 400, { error: "goal is required" });
+      return;
+    }
+    const result = await manager.rename(parts[1]!, goal);
+    json(res, result.ok ? 200 : 409, result);
+    return;
+  }
+
   if (req.method === "DELETE" && parts[0] === "tasks" && parts.length === 2) {
     const result = await manager.deleteTask(parts[1]!);
     json(res, result.ok ? 200 : 409, result);

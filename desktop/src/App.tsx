@@ -40,6 +40,25 @@ export function App() {
     localStorage.setItem("forge-theme", theme);
   }, [theme]);
 
+  // Keyboard shortcuts: ⌘N new task, ⌘F focus search, Esc back/close.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        newTask();
+      } else if (mod && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        document.getElementById("session-search")?.focus();
+      } else if (e.key === "Escape") {
+        if (showSettings || showMemory) { setShowSettings(false); setShowMemory(false); }
+        else if (store.state.selectedTaskId) store.select("");
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   async function loadAll() {
     try {
       initClient(cfg);
@@ -133,6 +152,7 @@ export function App() {
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         onDeleteSession={async (id) => { await store.deleteSession(id); }}
+        onRenameSession={async (id, goal) => { await store.renameSession(id, goal); }}
         onOpenMemory={() => { setShowSettings(false); setShowMemory(true); store.select(""); }}
       />
 
@@ -197,17 +217,17 @@ function EmptyWorkspace({ focusSignal, activeProjectName, providers, defaultProv
         <div style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center" as const, marginBottom: 24 }}>
           {activeProjectName ? `Working in ${activeProjectName}` : "No project selected — sessions will be unassigned"}
         </div>
-        {providers.length > 0 && (
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-            <select value={providerId ?? ""} onChange={(e) => setProviderId(e.target.value || null)}
-              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)", backgroundColor: "var(--bg-secondary)", color: "var(--text)", fontSize: 13, maxWidth: 280 }}>
+        <SessionComposer
+          onSubmit={(goal) => onSubmit(goal, providerId ?? undefined)}
+          focusSignal={focusSignal}
+          leftSlot={providers.length > 0 ? (
+            <select value={providerId ?? ""} onChange={(e) => setProviderId(e.target.value || null)} className="composer-model-select">
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>{modelLabel(p.baseUrl)} · {p.modelId}</option>
               ))}
             </select>
-          </div>
-        )}
-        <SessionComposer onSubmit={(goal) => onSubmit(goal, providerId ?? undefined)} focusSignal={focusSignal} />
+          ) : undefined}
+        />
       </div>
     </div>
   );

@@ -92,6 +92,20 @@ export async function deleteSession(taskId: string): Promise<void> {
   if (!r.ok) throw new Error(`DELETE /tasks/${taskId} → ${r.status}`);
 }
 
+export async function cancelTask(taskId: string): Promise<void> {
+  const r = await fetch(`${cfg!.baseUrl}/tasks/${taskId}/cancel`, { method: "POST", headers: headers() });
+  if (!r.ok) throw new Error(`POST cancel → ${r.status}`);
+}
+
+export async function renameTask(taskId: string, goal: string): Promise<void> {
+  const r = await fetch(`${cfg!.baseUrl}/tasks/${taskId}/rename`, {
+    method: "POST",
+    headers: { ...headers(), "content-type": "application/json" },
+    body: JSON.stringify({ goal }),
+  });
+  if (!r.ok) throw new Error(`POST rename → ${r.status}`);
+}
+
 export async function switchSubscription(taskId: string, providerId: string): Promise<void> {
   const r = await fetch(`${cfg!.baseUrl}/tasks/${taskId}/subscription`, {
     method: "POST",
