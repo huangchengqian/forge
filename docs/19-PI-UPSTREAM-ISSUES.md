@@ -53,6 +53,24 @@ tag-based approach is broader.
 
 ## Issue 2: anthropic-messages stream: CJK text deltas get reordered (field corruption)
 
+**Status: RESOLVED — root cause was in Forge, not pi.**
+
+The suspected area below was wrong. Pi's entire streaming chain (pi-ai
+`anthropic-messages.ts` → agent-loop → agent-session → rpc-mode stdout) is
+strictly order-preserving — every hop either forwards deltas synchronously or
+awaits them in sequence. The corruption came from Forge's own persistence:
+`task-manager`'s `onPiEvent` issued one fire-and-forget `void appendEvent`
+per delta, and the concurrent `appendFile` calls raced in the libuv
+threadpool, scrambling the JSONL line order that the SSE stream (and the
+desktop) consume as ordered truth. `message_end` was always clean because pi
+emits it from the complete in-memory message.
+
+Fixed in Forge (`src/core/persistence/event-log.ts`): per-task FIFO append
+queue + regression test (`event-log-order.test.ts`, which fails against the
+unchained implementation with a real reorder at position 3).
+
+Original analysis kept for the record:
+
 **Title**: anthropic-messages: streamed text deltas for CJK content arrive out of order / interleaved, corrupting JSON output
 
 **Environment**

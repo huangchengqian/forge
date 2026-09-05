@@ -122,14 +122,14 @@ product direction in `ROADMAP.md`.
 
 ## Known issues
 
-- Streaming CJK corruption (mitigated): with some providers the streamed
-  `text_delta` events arrive with character reordering, but the runtime's
-  final `message_end` message is clean. Forge now replaces accumulated deltas
-  with the authoritative final text at every consumption point (turn result,
-  conversation history, desktop view), so corrupted streaming self-corrects
-  when a message completes. The root cause lives in Pi's streaming adapter;
-  since Pi is vendored here we'll fix it at the source — see
-  `docs/19-PI-UPSTREAM-ISSUES.md`.
+- Streaming CJK corruption (**fixed**): with some providers the streamed
+  `text_delta` events arrived with chunk reordering. The root cause was in
+  Forge, not the runtime: fire-and-forget event-log appends raced in the
+  libuv threadpool and scrambled the ordered JSONL that the SSE stream
+  serves. Fixed with a per-task FIFO append queue
+  (`src/core/persistence/event-log.ts`). Runtime deltas were never corrupted;
+  the `message_end` authoritative-text fallback from the earlier mitigation
+  remains as defense in depth. See `docs/19-PI-UPSTREAM-ISSUES.md`.
 - Real-task success rate varies a lot by model; weak agentic models produce
   plans they cannot finish. Verification will catch it, but the task fails.
 

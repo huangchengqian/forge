@@ -161,12 +161,13 @@ export class PiRuntime implements AgentRuntime {
 }
 
 export function lastAssistantText(events: readonly PiEvent[]): string {
-  // Streaming text_delta events can arrive corrupted with some providers
-  // (CJK character reordering inside the runtime's streaming adapter —
-  // verified against real captures: deltas scrambled, final message clean).
-  // `message_end` carries the authoritative final message, so prefer it and
-  // fall back to delta accumulation only when no assistant message_end was
-  // observed (older runtimes, aborted turns).
+  // Historical note: delta reordering was once attributed to the runtime's
+  // streaming adapter, but the real cause was Forge's own event persistence
+  // (fire-and-forget appends racing in the libuv threadpool — fixed with a
+  // per-task FIFO queue in event-log.ts). Runtime deltas were never
+  // corrupted. Preferring `message_end` text is kept as defense in depth:
+  // it reflects the runtime's complete in-memory message even if an older
+  // runtime or transport ever mangles deltas, and it covers aborted turns.
   let deltaBuf = "";
   let finalText: string | null = null;
   for (const e of events) {

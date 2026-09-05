@@ -38,7 +38,34 @@ function eventFile(taskId: string): string {
   return join(eventsDir(), `${taskId}.events.jsonl`);
 }
 
-export async function appendEvent(taskId: string, type: PersistedEventType, payload: Record<string, unknown>): Promise<PersistedEvent> {
+/**
+ * Per-task FIFO chain for appends.
+ *
+ * The streaming path fires appends without awaiting them (`void appendEvent`
+ * in task-manager's onPiEvent, one call per agent delta). Concurrent
+ * appendFile calls race in the libuv threadpool and their writes land in
+ * arbitrary order, scrambling the JSONL line order. The SSE stream and the
+ * desktop treat this file as ordered truth, so scrambled appends corrupted
+ * streamed text (observed as CJK delta reordering / swapped chunks in real
+ * captures). Chaining per task restores call-order persistence; await
+ * semantics are unchanged — a caller's append still completes before its
+ * promise resolves.
+ */
+const appendQueues = new Map<string, Promise<unknown>>();
+
+export function appendEvent(taskId: string, type: PersistedEventType, payload: Record<string, unknown>): Promise<PersistedEvent> {
+  const prev = appendQueues.get(taskId) ?? Promise.resolve();
+  const run = prev.then(() => appendEventNow(taskId, type, payload));
+  // Keep the chain alive (and the map bounded) even if an append fails.
+  const queued = run.catch(() => {});
+  appendQueues.set(taskId, queued);
+  void queued.finally(() => {
+    if (appendQueues.get(taskId) === queued) appendQueues.delete(taskId);
+  });
+  return run;
+}
+
+async function appendEventNow(taskId: string, type: PersistedEventType, payload: Record<string, unknown>): Promise<PersistedEvent> {
   await mkdir(eventsDir(), { recursive: true });
   const event: PersistedEvent = {
     id: randomUUID(),
