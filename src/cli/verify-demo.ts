@@ -81,8 +81,15 @@ async function main() {
   const v3 = await verifyCriteria("step-1", [{ kind: "git_diff_contains", pattern: "hello" }], taskDir);
   console.log(`  passed: ${v3.passed} — ${v3.failed[0]?.message ?? "no failure"}`);
 
-  console.log("\n--- Stage 4: command_exit_zero ---");
-  const v4 = await verifyCriteria("step-1", [{ kind: "command_exit_zero", command: "node -e 'console.log(1+1)'" }], taskDir);
+  console.log("\n--- Stage 4: command_exit_zero (allowlisted command) ---");
+  // Arbitrary commands (e.g. `node -e`) are now blocked by the verification
+  // command policy unless explicitly allowlisted; use an allowlisted check.
+  await writeFile(
+    join(taskDir, "smoke.test.mjs"),
+    "import assert from 'node:assert/strict';\nassert.equal(1 + 1, 2);\n",
+    "utf8",
+  );
+  const v4 = await verifyCriteria("step-1", [{ kind: "command_exit_zero", command: "node --test smoke.test.mjs" }], taskDir);
   console.log(`  passed: ${v4.passed} — ${v4.criteriaResults[0]?.message}`);
 
   console.log("\n--- Stage 5: Full Orchestrator lifecycle with multi-criteria plan ---");

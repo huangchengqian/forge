@@ -10,7 +10,9 @@ import { defaultPolicyPath, evaluateToolCall, loadPolicy } from "../guard/policy
  */
 const REGISTERED_CHECKS: readonly RegExp[] = [
   /^(?:npm|pnpm|yarn|bun)\s+(?:test|run\s+(?:test|lint|typecheck|build))(?:\s+--[\w=-]+)*$/,
-  /^npx\s+tsc\s+--noEmit(?:\s+--[\w=-]+)*$/,
+  // `npx tsc --noEmit`, including npx flags like `-y -p typescript@5` that the
+  // skill registry emits for a hermetic typecheck.
+  /^npx(?:\s+-[a-z](?:\s+[^\s-][\w@./-]*)?)*\s+tsc\s+--noEmit(?:\s+--[\w-]+(?:\s+[^\s-][\w./-]*)?)*(?:\s+[^\s-][\w./-]*)?$/,
   /^node\s+--test(?:\s+[./\w-]+)*$/,
 ];
 
