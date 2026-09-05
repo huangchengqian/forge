@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CHAT_SYSTEM_PROMPT,
+  ROUTER_SYSTEM_PROMPT,
   classifyIntent,
   conversationReply,
   extractIntentJson,
@@ -184,6 +186,28 @@ describe("replayConversationHistory", () => {
       { type: "AGENT_EVENT", payload: { piEvent: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "仅 delta" } } } },
     ];
     assert.deepEqual(replayConversationHistory(events), [{ role: "assistant", content: "仅 delta" }]);
+  });
+});
+
+describe("conversation prompt positioning (Phase 9.8)", () => {
+  test("CHAT_SYSTEM_PROMPT frames conversation as a lightweight agent, not a tool-less bot", () => {
+    // The old framing literally instructed the model to say it had no tools
+    // ("You have NO tools and NO file access"). The new prompt only mentions
+    // tools inside "Avoid saying 'I have no tools'", which is the opposite.
+    assert.ok(!CHAT_SYSTEM_PROMPT.includes("NO tools"), "must not use the all-caps 'NO tools' framing");
+    assert.ok(!CHAT_SYSTEM_PROMPT.includes("NO file access"), "must not use the all-caps 'NO file access' framing");
+    // New positioning: lightweight conversation mode that reasons but does not act.
+    assert.ok(CHAT_SYSTEM_PROMPT.includes("conversation mode"));
+    assert.ok(CHAT_SYSTEM_PROMPT.includes("explain code"));
+    assert.ok(CHAT_SYSTEM_PROMPT.includes("reason about solutions"));
+    assert.ok(CHAT_SYSTEM_PROMPT.includes("not an autonomous execution agent"));
+    assert.ok(CHAT_SYSTEM_PROMPT.includes("suggest starting an engineering task"));
+    assert.ok(CHAT_SYSTEM_PROMPT.includes("Avoid saying"));
+  });
+
+  test("ROUTER conversation guidance avoids the tool-less framing too", () => {
+    assert.ok(!ROUTER_SYSTEM_PROMPT.includes("NO file access and NO tools"));
+    assert.ok(ROUTER_SYSTEM_PROMPT.includes("suggest starting an engineering task"));
   });
 });
 
