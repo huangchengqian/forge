@@ -1,7 +1,7 @@
 import { access, readFile, stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
 import type { CriterionResult, SuccessCriterion } from "../core/types/criterion.ts";
+import { decideCommand, resolveWithinWorkspace, verificationEnv } from "./command-policy.ts";
 
 export async function validateFileExists(
   criterion: Extract<SuccessCriterion, { kind: "file_exists" }>,
@@ -71,15 +71,24 @@ export async function validateCommandExitZero(
   baseCwd: string,
   timeoutMs = 30_000,
 ): Promise<CriterionResult> {
-  const cwd = criterion.cwd ? resolvePath(criterion.cwd, baseCwd) : baseCwd;
+  let cwd: string;
+  try {
+    cwd = resolveWithinWorkspace(baseCwd, criterion.cwd);
+  } catch (err) {
+    return fail(criterion, "invalid verification cwd", {}, undefined, undefined, errMessage(err));
+  }
+  const decision = decideCommand(criterion.command);
+  if (!decision.allowed) {
+    return fail(criterion, decision.reason, { command: criterion.command, policy: "blocked" }, undefined, undefined, undefined);
+  }
   return await new Promise((resolveP) => {
-    // Use bash (not sh): LLM-generated verification commands routinely use
-    // bash-only syntax such as process substitution `diff <(...)`, which
-    // `/bin/sh` rejects with exit 2 → every step fails forever.
+    // Registered checks have a deliberately narrow grammar. We still use bash
+    // for compatibility with package-manager invocation, but custom shell
+    // syntax never reaches this point without an explicit Guard allow rule.
     const child = spawn("/bin/bash", ["-c", criterion.command], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: verificationEnv(baseCwd),
     });
 
     let stdout = "";
@@ -127,7 +136,7 @@ export async function validateTestPass(
   baseCwd: string,
 ): Promise<CriterionResult> {
   return await validateCommandExitZero(
-    { kind: "command_exit_zero", command: criterion.name, cwd: baseCwd },
+    { kind: "command_exit_zero", command: criterion.name },
     baseCwd,
     120_000,
   );
@@ -163,27 +172,30 @@ export async function validate(
   criterion: SuccessCriterion,
   baseCwd: string,
 ): Promise<CriterionResult> {
-  switch (criterion.kind) {
-    case "file_exists":
-      return validateFileExists(criterion, baseCwd);
-    case "file_contains":
-      return validateFileContains(criterion, baseCwd);
-    case "file_not_contains":
-      return validateFileNotContains(criterion, baseCwd);
-    case "directory_exists":
-      return validateDirectoryExists(criterion, baseCwd);
-    case "command_exit_zero":
-      return validateCommandExitZero(criterion, baseCwd);
-    case "test_pass":
-      return validateTestPass(criterion, baseCwd);
-    case "git_diff_contains":
-      return validateGitDiffContains(criterion, baseCwd);
+  try {
+    switch (criterion.kind) {
+      case "file_exists":
+        return await validateFileExists(criterion, baseCwd);
+      case "file_contains":
+        return await validateFileContains(criterion, baseCwd);
+      case "file_not_contains":
+        return await validateFileNotContains(criterion, baseCwd);
+      case "directory_exists":
+        return await validateDirectoryExists(criterion, baseCwd);
+      case "command_exit_zero":
+        return await validateCommandExitZero(criterion, baseCwd);
+      case "test_pass":
+        return await validateTestPass(criterion, baseCwd);
+      case "git_diff_contains":
+        return await validateGitDiffContains(criterion, baseCwd);
+    }
+  } catch (err) {
+    return fail(criterion, "invalid verification path", {}, undefined, undefined, errMessage(err));
   }
 }
 
 function resolvePath(p: string, baseCwd: string): string {
-  if (p.startsWith("/")) return p;
-  return join(baseCwd, p);
+  return resolveWithinWorkspace(baseCwd, p);
 }
 
 function ok(criterion: SuccessCriterion, message: string, metadata: Record<string, unknown>): CriterionResult {

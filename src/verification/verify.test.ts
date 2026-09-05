@@ -81,16 +81,24 @@ describe("directory_exists", () => {
 });
 
 describe("command_exit_zero", () => {
-  test("pass on exit 0", async () => {
-    const r = await validateCommandExitZero({ kind: "command_exit_zero", command: "true" }, TMP);
+  test("runs a registered project check", async () => {
+    await writeFile(join(TMP, "pass.test.mjs"), 'import test from "node:test"; test("pass", () => {});\n', "utf8");
+    const r = await validateCommandExitZero({ kind: "command_exit_zero", command: "node --test pass.test.mjs" }, TMP);
     assert.equal(r.passed, true);
     assert.equal(r.exitCode, 0);
   });
 
-  test("fail on non-zero exit", async () => {
+  test("blocks custom shell commands unless Guard explicitly allows them", async () => {
     const r = await validateCommandExitZero({ kind: "command_exit_zero", command: "exit 3" }, TMP);
     assert.equal(r.passed, false);
-    assert.equal(r.exitCode, 3);
+    assert.match(r.message, /requires an explicit Forge Guard allow rule/);
+  });
+
+  test("rejects an absolute or escaping cwd", async () => {
+    const absolute = await validateCommandExitZero({ kind: "command_exit_zero", command: "node --test pass.test.mjs", cwd: "/tmp" }, TMP);
+    const escape = await validateCommandExitZero({ kind: "command_exit_zero", command: "node --test pass.test.mjs", cwd: "../" }, TMP);
+    assert.equal(absolute.passed, false);
+    assert.equal(escape.passed, false);
   });
 });
 
@@ -103,13 +111,22 @@ describe("git_diff_contains", () => {
 
 describe("test_pass", () => {
   test("passes when test command exits 0", async () => {
-    const r = await validate({ kind: "test_pass", name: "echo ok" }, TMP);
+    await writeFile(join(TMP, "pass-command.test.mjs"), 'import test from "node:test"; test("pass", () => {});\n', "utf8");
+    const r = await validate({ kind: "test_pass", name: "node --test pass-command.test.mjs" }, TMP);
     assert.equal(r.passed, true);
   });
 
   test("fails when test command exits non-zero", async () => {
     const r = await validate({ kind: "test_pass", name: "exit 1" }, TMP);
     assert.equal(r.passed, false);
+  });
+});
+
+describe("workspace confinement", () => {
+  test("rejects file criteria that escape the workspace", async () => {
+    const r = await validate({ kind: "file_exists", path: "../outside.txt" }, TMP);
+    assert.equal(r.passed, false);
+    assert.match(r.message, /escapes the task workspace/);
   });
 });
 

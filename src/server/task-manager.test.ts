@@ -133,6 +133,23 @@ describe("TaskManager workspace locking", () => {
   });
 });
 
+describe("TaskManager cancellation", () => {
+  test("cancel converges to the explicit CANCELLED terminal state", async () => {
+    process.env.FORGE_FAKE_DELAY_MS = "300";
+    try {
+      const { taskId } = await manager.create({ goal: "cancel me", projectId: projectA.id });
+      const settle = manager.whenSettled(taskId);
+      const result = await manager.cancel(taskId);
+      assert.equal(result.cancelled, true);
+      const settled = await settle;
+      assert.equal(settled?.state, "CANCELLED");
+      assert.equal((await manager.get(taskId))?.state, "CANCELLED");
+    } finally {
+      delete process.env.FORGE_FAKE_DELAY_MS;
+    }
+  });
+});
+
 describe("TaskManager preflight", () => {
   test("ok when project exists and runtime is fake", async () => {
     const r = await manager.preflight({ projectId: projectA.id });

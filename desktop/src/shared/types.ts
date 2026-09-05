@@ -1,6 +1,6 @@
 export type TaskState =
   | "READY" | "UNDERSTAND" | "PLAN" | "EXECUTE" | "OBSERVE"
-  | "FIX" | "EVALUATE" | "COMPLETE" | "REVIEW_REQUIRED" | "FAILED";
+  | "FIX" | "EVALUATE" | "COMPLETE" | "REVIEW_REQUIRED" | "FAILED" | "CANCELLED";
 
 export type StepStatus = "pending" | "ready" | "running" | "verified" | "failed" | "cancelled";
 

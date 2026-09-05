@@ -52,6 +52,9 @@ export type OrchestratorHandle = {
   maxConcurrency: number | undefined;
   evaluator: Evaluator;
   bus: EventBus | undefined;
+  deadlineMs: number | undefined;
+  policy: RetryPolicy | undefined;
+  abortSignal?: AbortSignal;
 };
 
 function todayPrefix(): string {
@@ -243,6 +246,8 @@ export async function startTask(opts: OrchestratorOptions): Promise<Orchestrator
     maxConcurrency: opts.maxConcurrency,
     evaluator: opts.evaluator ?? new DeterministicEvaluator(),
     bus: opts.eventBus,
+    deadlineMs: opts.deadlineMs,
+    policy: opts.policy,
   };
 }
 
@@ -283,6 +288,8 @@ export async function attachTask(opts: OrchestratorOptions): Promise<Orchestrato
     maxConcurrency: opts.maxConcurrency,
     evaluator: opts.evaluator ?? new DeterministicEvaluator(),
     bus: opts.eventBus,
+    deadlineMs: opts.deadlineMs,
+    policy: opts.policy,
   };
 }
 
@@ -292,13 +299,15 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
   const planner = handle.planner;
   const bus = handle.bus;
   const registry = handle.skillRegistry ?? getGlobalSkillRegistry();
-  const policy = handle.session ? DEFAULT_RETRY_POLICY : DEFAULT_RETRY_POLICY;
-  const optsPolicy = (handle as unknown as { _policy?: RetryPolicy })._policy;
-  const finalPolicy: RetryPolicy = optsPolicy ?? DEFAULT_RETRY_POLICY;
-  const scheduler = new ExecutionScheduler(handle.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY);
+  const finalPolicy: RetryPolicy = handle.policy ?? DEFAULT_RETRY_POLICY;
+  // A Pi session carries one conversational context and writes one workspace.
+  // The RPC client serializes prompts, so advertising parallel execution here
+  // is both misleading and unsafe for runtimes that do not. Parallel work
+  // requires isolated sessions/worktrees, not a larger number here.
+  const scheduler = new ExecutionScheduler(1);
   const evaluator = handle.evaluator;
 
-  const deadline = Date.now() + (process.env.FORGE_DEADLINE_MS ? Number(process.env.FORGE_DEADLINE_MS) : 10 * 60_000);
+  const deadline = Date.now() + (handle.deadlineMs ?? 10 * 60_000);
 
   if (task.state === "READY") {
     const from = task.state;
@@ -310,6 +319,7 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
   }
 
   while (!isTerminal(task.state) && Date.now() < deadline) {
+    if (handle.abortSignal?.aborted) return cancelTask(task, bus);
     switch (task.state) {
       case "UNDERSTAND": {
         const matched = registry.match({
@@ -319,6 +329,7 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
         });
         const ctx: TaskContext = { task, directory: task.directory, matchedSkills: matched };
         const created = await planner.createPlan(ctx);
+        if (handle.abortSignal?.aborted) return cancelTask(task, bus);
         const plan = created.plan;
         // Surface which prior memories informed the plan (UI transparency).
         if (created.usedMemories && created.usedMemories.length > 0) {
@@ -380,8 +391,10 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
             session,
             handle.runtime,
             bus,
+            handle.abortSignal,
           );
           task = afterBatch;
+          if (handle.abortSignal?.aborted) return cancelTask(task, bus);
         }
         const from = task.state;
         task = await transition(task, "OBSERVE");
@@ -402,6 +415,7 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
         }
         let allPassed = true;
         for (const s of justRun) {
+          if (handle.abortSignal?.aborted) return cancelTask(task, bus);
           const r = await observeStep(task, s);
           task = r.task;
           if (r.allPassed) {
@@ -415,6 +429,7 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
           const updateResult = lastObservation && task.plan
             ? await planner.updatePlan({ task, directory: task.directory, matchedSkills: [] }, lastObservation)
             : null;
+          if (handle.abortSignal?.aborted) return cancelTask(task, bus);
           if (updateResult && updateResult.changed && task.plan && updateResult.plan.id === task.plan.id) {
             const prevSteps = task.plan.steps.map((s) => s.id);
             const nextSteps = updateResult.plan.steps.map((s) => s.id);
@@ -576,6 +591,7 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
           break;
         }
         await handle.runtime.prompt(handle.session, action.promptHint, { deadlineMs: 5 * 60_000 });
+        if (handle.abortSignal?.aborted) return cancelTask(task, bus);
 
         const fixedStep: PlanStep = {
           ...rewrittenStep,
@@ -604,9 +620,19 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
     task = await failTask(task, "deadline exceeded", bus);
   }
 
-  void policy;
-
   return task;
+}
+
+/** Persist cancellation as a Forge lifecycle outcome, independent of runtime exit. */
+export async function cancelTask(task: TaskSession, bus: EventBus | undefined): Promise<TaskSession> {
+  if (task.state === "CANCELLED") return task;
+  const from = task.state;
+  const updated: TaskSession = { ...task, state: "CANCELLED", failureReason: "cancelled by user", updatedAt: Date.now() };
+  await saveTask(updated);
+  emitStateChange(bus, updated, from, "CANCELLED");
+  publish(bus, { type: "failed", taskId: updated.id, reason: "cancelled by user", at: Date.now() });
+  await appendEvent(updated.id, "TASK_CANCELLED", { reason: "cancelled by user" });
+  return updated;
 }
 
 async function failTask(task: TaskSession, reason: string, bus: EventBus | undefined): Promise<TaskSession> {
@@ -634,4 +660,3 @@ async function saveAndTransition(task: TaskSession, to: TaskState, bus: EventBus
   emitStateChange(bus, updated, from, updated.state);
   return updated;
 }
-

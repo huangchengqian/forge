@@ -8,19 +8,21 @@ export type TaskState =
   | "EVALUATE"
   | "COMPLETE"
   | "REVIEW_REQUIRED"
-  | "FAILED";
+  | "FAILED"
+  | "CANCELLED";
 
 const TRANSITIONS: Readonly<Record<TaskState, readonly TaskState[]>> = {
-  READY: ["UNDERSTAND", "FAILED"],
-  UNDERSTAND: ["PLAN", "FAILED"],
-  PLAN: ["EXECUTE", "FAILED"],
-  EXECUTE: ["OBSERVE", "FAILED"],
-  OBSERVE: ["EXECUTE", "FIX", "EVALUATE", "FAILED"],
-  FIX: ["EXECUTE", "FAILED"],
-  EVALUATE: ["COMPLETE", "REVIEW_REQUIRED", "FAILED"],
+  READY: ["UNDERSTAND", "FAILED", "CANCELLED"],
+  UNDERSTAND: ["PLAN", "FAILED", "CANCELLED"],
+  PLAN: ["EXECUTE", "FAILED", "CANCELLED"],
+  EXECUTE: ["OBSERVE", "FAILED", "CANCELLED"],
+  OBSERVE: ["EXECUTE", "FIX", "EVALUATE", "FAILED", "CANCELLED"],
+  FIX: ["EXECUTE", "FAILED", "CANCELLED"],
+  EVALUATE: ["COMPLETE", "REVIEW_REQUIRED", "FAILED", "CANCELLED"],
   COMPLETE: [],
   REVIEW_REQUIRED: [],
   FAILED: [],
+  CANCELLED: [],
 } as const;
 
 export function canTransition(from: TaskState, to: TaskState): boolean {
@@ -32,5 +34,5 @@ export function nextStates(from: TaskState): readonly TaskState[] {
 }
 
 export function isTerminal(state: TaskState): boolean {
-  return state === "COMPLETE" || state === "REVIEW_REQUIRED" || state === "FAILED";
+  return state === "COMPLETE" || state === "REVIEW_REQUIRED" || state === "FAILED" || state === "CANCELLED";
 }

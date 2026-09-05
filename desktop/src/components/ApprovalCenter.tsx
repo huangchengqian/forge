@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ApprovalRecord } from "../lib/desktop-client.ts";
 
-const TERMINAL = new Set(["COMPLETE", "FAILED", "REVIEW_REQUIRED"]);
+const TERMINAL = new Set(["COMPLETE", "FAILED", "REVIEW_REQUIRED", "CANCELLED"]);
 
 export function isTaskTerminal(state: string): boolean {
   return TERMINAL.has(state);

@@ -30,6 +30,34 @@ class StaticPlanner implements Planner {
   }
 }
 
+/** Adds one necessary follow-up after the initial step verifies. */
+class AdaptivePlanner extends StaticPlanner {
+  private revised = false;
+
+  override async updatePlan(ctx: TaskContext, observation: Observation): Promise<UpdatePlanResult> {
+    if (this.revised || observation.result !== "PASS" || !ctx.task.plan) return null;
+    this.revised = true;
+    const followUp: PlanStep = {
+      id: "step-follow-up",
+      intent: "record the verified implementation in a completion marker",
+      status: "pending",
+      attempts: 0,
+      dependencies: ctx.task.plan.steps.map((step) => step.id),
+      executionGroup: undefined,
+      successCriteria: [{ kind: "file_contains", path: "completion.txt", pattern: "verified" }],
+    };
+    return {
+      changed: true,
+      plan: {
+        ...ctx.task.plan,
+        version: ctx.task.plan.version + 1,
+        steps: [...ctx.task.plan.steps, followUp],
+        updatedAt: Date.now(),
+      },
+    };
+  }
+}
+
 const CALC_PATH = "src/calc.ts";
 
 async function readCalc(workspace: string): Promise<string> {
@@ -195,6 +223,30 @@ export const GOLDEN_TASKS: readonly GoldenTask[] = [
         const obj = JSON.parse(raw) as { scripts?: Record<string, string> };
         obj.scripts = { ...(obj.scripts ?? {}), test: "node --test" };
         await writeFile(join(workspace, "package.json"), JSON.stringify(obj, null, 2) + "\n", "utf8");
+      }
+    },
+  },
+  {
+    id: "F-adaptive-follow-up",
+    category: "adaptive-planning",
+    title: "Revise the plan after verification and execute its new follow-up",
+    goal: "Create the initial artifact, then record that it was verified",
+    buildPlanner: () => new AdaptivePlanner([
+      {
+        id: "step-initial",
+        intent: "create the initial artifact",
+        status: "pending",
+        attempts: 0,
+        dependencies: [],
+        executionGroup: undefined,
+        successCriteria: [{ kind: "file_contains", path: "initial.txt", pattern: "ready" }],
+      },
+    ]),
+    perform: async (stepId, workspace) => {
+      if (stepId === "step-initial") {
+        await writeWorkspaceFile(workspace, "initial.txt", "ready\n");
+      } else if (stepId === "step-follow-up") {
+        await writeWorkspaceFile(workspace, "completion.txt", "verified\n");
       }
     },
   },

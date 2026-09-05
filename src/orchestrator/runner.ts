@@ -20,6 +20,7 @@ export async function runStepBatch(
   session: RuntimeSession,
   runtime: AgentRuntime,
   bus: EventBus | undefined,
+  abortSignal?: AbortSignal,
 ): Promise<{ task: TaskSession; results: readonly StepRunResult[] }> {
   if (steps.length === 0) return { task, results: [] };
 
@@ -62,6 +63,10 @@ export async function runStepBatch(
       return { stepId: s.id, success: turn.success, error: turn.error };
     }),
   );
+
+  // The orchestrator owns the terminal state transition; return without a
+  // second snapshot write so it can persist CANCELLED at the next boundary.
+  if (abortSignal?.aborted) return { task: partial, results: [] };
 
   const results: StepRunResult[] = settled.map((r, i) => {
     const s = steps[i]!;

@@ -11,6 +11,7 @@ export const STATE_LABELS: Readonly<Record<TaskState, string>> = {
   COMPLETE: "Completed",
   REVIEW_REQUIRED: "Needs your review",
   FAILED: "Failed",
+  CANCELLED: "Cancelled",
 };
 
 export function stateLabel(state: TaskState): string {
@@ -29,6 +30,7 @@ export function stateDescription(state: TaskState): string {
     case "COMPLETE": return "All steps verified and quality checked";
     case "REVIEW_REQUIRED": return "Quality check flagged issues that need human review";
     case "FAILED": return "Task could not be completed";
+    case "CANCELLED": return "Stopped by you before completion";
     default: return state;
   }
 }

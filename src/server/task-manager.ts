@@ -6,6 +6,7 @@ import { access, constants, stat, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   attachTask,
+  cancelTask as persistCancellation,
   newTaskId,
   runOrchestrator,
   startTask,
@@ -78,6 +79,7 @@ type ActiveEntry = {
   runPromise: Promise<TaskSession>;
   /** Resolved workspace lock key; released when the task leaves the active set. */
   workspaceKey: string;
+  controller: AbortController;
 };
 
 export type PreflightResult = {
@@ -384,17 +386,27 @@ export class TaskManager {
     await saveTask(handle.task);
 
     const session = handle.session;
+    const controller = new AbortController();
+    handle.abortSignal = controller.signal;
     const runPromise = runOrchestrator(handle)
       .then((final) => {
         this.settle(taskId, final);
         return final;
       })
-      .catch((err) => {
+      .catch(async (err) => {
+        if (controller.signal.aborted) {
+          const current = await loadTask(taskId);
+          if (current) {
+            const final = await persistCancellation(current, this.opts.bus);
+            this.settle(taskId, final);
+            return final;
+          }
+        }
         this.release(taskId);
         this.opts.supervisor.reportCrash(taskId, err);
         throw err;
       });
-    this.active.set(taskId, { taskId, session, runtime: handle.runtime, runPromise, workspaceKey });
+    this.active.set(taskId, { taskId, session, runtime: handle.runtime, runPromise, workspaceKey, controller });
     this.opts.supervisor.track(taskId);
     return { taskId };
   }
@@ -546,17 +558,27 @@ export class TaskManager {
     }
 
     const session = handle.session;
+    const controller = new AbortController();
+    handle.abortSignal = controller.signal;
     const runPromise = runOrchestrator(handle)
       .then((final) => {
         this.settle(taskId, final);
         return final;
       })
-      .catch((err) => {
+      .catch(async (err) => {
+        if (controller.signal.aborted) {
+          const current = await loadTask(taskId);
+          if (current) {
+            const final = await persistCancellation(current, this.opts.bus);
+            this.settle(taskId, final);
+            return final;
+          }
+        }
         this.release(taskId);
         this.opts.supervisor.reportCrash(taskId, err);
         throw err;
       });
-    this.active.set(taskId, { taskId, session, runtime: handle.runtime, runPromise, workspaceKey });
+    this.active.set(taskId, { taskId, session, runtime: handle.runtime, runPromise, workspaceKey, controller });
     this.opts.supervisor.track(taskId);
 
     const planInfo = await this.recovery.plan(taskId);
@@ -574,6 +596,9 @@ export class TaskManager {
     if (!rec) {
       return { cancelled: false, message: "task not active on this server; use resume first" };
     }
+    // Cancellation is a Forge decision. Signal the orchestrator before
+    // touching the runtime so it can durably reach CANCELLED even if Pi exits.
+    rec.controller.abort();
     try {
       await rec.runtime.abort(rec.session);
     } catch {}
@@ -583,7 +608,7 @@ export class TaskManager {
     } catch {}
     return {
       cancelled: true,
-      message: "stop signalled; runtime session destroyed; task settles via normal state machine",
+      message: "stop signalled; task will settle as CANCELLED",
     };
   }
 

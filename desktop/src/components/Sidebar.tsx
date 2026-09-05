@@ -173,7 +173,7 @@ export function Sidebar({ projects, activeProjectId, onSelectProject, onAddProje
 }
 
 function stateColor(s: string): string {
-  return s === "COMPLETE" ? "var(--green)" : s === "FAILED" ? "var(--red)" : s === "REVIEW_REQUIRED" ? "var(--yellow)" : "var(--accent)";
+  return s === "COMPLETE" ? "var(--green)" : s === "FAILED" || s === "CANCELLED" ? "var(--red)" : s === "REVIEW_REQUIRED" ? "var(--yellow)" : "var(--accent)";
 }
 
 function relativeTime(ts: number): string {

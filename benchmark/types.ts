@@ -1,7 +1,7 @@
 import type { Planner } from "../src/orchestrator/planner.ts";
 import type { TaskSession } from "../src/core/types/task-session.ts";
 
-export type GoldenCategory = "new-feature" | "bug-fix" | "refactor" | "test-addition" | "config-change";
+export type GoldenCategory = "new-feature" | "bug-fix" | "refactor" | "test-addition" | "config-change" | "adaptive-planning";
 
 export type GoldenTask = {
   id: string;

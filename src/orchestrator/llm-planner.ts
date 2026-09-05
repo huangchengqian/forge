@@ -21,8 +21,41 @@ export class LlmPlanner implements Planner {
     return this.planFromLlm(ctx);
   }
 
-  async updatePlan(_ctx: TaskContext, _observation: Observation): Promise<UpdatePlanResult> {
-    return null;
+  async updatePlan(ctx: TaskContext, observation: Observation): Promise<UpdatePlanResult> {
+    const current = ctx.task.plan;
+    if (!current || observation.result !== "PASS") return null;
+    const completed = current.steps.filter((s) => s.status === "verified").map((s) => s.intent);
+    const remaining = current.steps.filter((s) => s.status !== "verified").map((s) => s.intent);
+    const prompt =
+      `You are Forge's adaptive planner. Decide whether the verified work requires additional engineering steps.\n` +
+      `Goal: ${ctx.task.goal}\nVerified steps: ${JSON.stringify(completed)}\nRemaining steps: ${JSON.stringify(remaining)}\n` +
+      `Last verification: ${JSON.stringify(observation.criterionResults)}\n` +
+      `Output ONLY JSON: {"suggestedSteps":[{"intent":"outcome","successCriteria":[{"kind":"command_exit_zero","command":"check"}]}]}.\n` +
+      `Return an empty suggestedSteps array unless a necessary, concrete follow-up is missing. Never repeat an existing step.`;
+    const result = await this.opts.runtime.prompt(this.opts.session, prompt, { deadlineMs: 2 * 60_000 });
+    if (!result.success) return null;
+    const parsed = tryExtractJson(result.text);
+    if (!parsed?.suggestedSteps.length) return null;
+
+    const knownIntents = new Set(current.steps.map((s) => s.intent.trim().toLowerCase()));
+    const additions = parsed.suggestedSteps
+      .filter((s) => !knownIntents.has(s.intent.trim().toLowerCase()))
+      .map((s, index): PlanStep => ({
+        id: `step-${current.steps.length + index + 1}`,
+        intent: s.intent,
+        status: "pending",
+        attempts: 0,
+        successCriteria: s.successCriteria,
+        // A follow-up must wait until all work that existed when it was
+        // proposed is verified; this preserves the explicit DAG semantics.
+        dependencies: current.steps.map((step) => step.id),
+        executionGroup: undefined,
+      }));
+    if (!additions.length) return null;
+    return {
+      changed: true,
+      plan: { ...current, version: current.version + 1, steps: [...current.steps, ...additions], updatedAt: Date.now() },
+    };
   }
 
   private async planFromSkills(ctx: TaskContext): Promise<CreatePlanResult> {

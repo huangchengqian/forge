@@ -22,6 +22,7 @@ export type PersistedEventType =
   | "EVALUATION_COMPLETED"
   | "TASK_COMPLETED"
   | "TASK_FAILED"
+  | "TASK_CANCELLED"
   | "MEMORY_USED"
   | "AGENT_EVENT";
 

@@ -1,6 +1,7 @@
 export {
   startTask,
   attachTask,
+  cancelTask,
   runOrchestrator,
   newTaskId,
 } from "./engine.ts";

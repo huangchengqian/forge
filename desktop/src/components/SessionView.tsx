@@ -113,6 +113,9 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
     } else if (e.type === "TASK_FAILED") {
       flushAgent(); flushTool();
       items.push({ kind: "status", text: "Failed", tone: "bad" });
+    } else if (e.type === "TASK_CANCELLED") {
+      flushAgent(); flushTool();
+      items.push({ kind: "status", text: "Cancelled", tone: "bad" });
     }
   }
   flushAgent(); flushTool();
@@ -302,12 +305,12 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
         )}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 28px" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto", paddingBottom: 24 }}>
+      <div className="conversation-scroll">
+        <div className="conversation-canvas">
           {/* User message */}
-          <div style={{ marginBottom: 20, marginTop: 18 }}>
-            <div className="role-label">User</div>
-            <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{task.goal}</div>
+          <div className="message message-user">
+            <div className="message-meta"><span className="message-avatar">你</span><span>你的任务</span></div>
+            <div className="message-user-body">{task.goal}</div>
           </div>
 
           {/* Plan (collapsible) */}
@@ -336,8 +339,8 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
             if (it.kind === "agent") {
               const isLast = streaming && i === items.length - 1;
               return (
-                <div key={i} style={{ margin: "18px 0" }}>
-                  <div className="role-label">Agent</div>
+                <div key={i} className="message message-agent">
+                  <div className="message-meta"><span className="message-avatar agent-avatar">F</span><span>Forge</span></div>
                   <div style={isLast ? { display: "inline" } : undefined}>
                     <Markdown text={it.text} />
                     {isLast && <span className="stream-caret" />}
@@ -363,7 +366,7 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
               );
             }
             return (
-              <div key={i} style={{ padding: "3px 0", fontSize: 13 }}>
+              <div key={i} className="status-event">
                 <span style={{ color: toneColor(it.tone) }}>{it.text}</span>
               </div>
             );
@@ -374,7 +377,7 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
 
           {/* Diff (only when changes exist) */}
           {diff && diff.kind !== "none" && (
-            <div style={{ borderTop: "1px solid var(--border)", marginTop: 16, paddingTop: 14 }}>
+            <div className="changed-files">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Changed files</span>
                 <button onClick={handleUndo} disabled={undoing} className="btn btn-ghost btn-small">{undoing ? "Restoring…" : "Undo"}</button>
@@ -401,8 +404,8 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
       </div>
 
       {onSend && (
-        <div style={{ borderTop: "1px solid var(--border)", padding: "12px 28px 16px" }}>
-          <div style={{ maxWidth: 760, margin: "0 auto" }}>
+        <div className="conversation-composer-wrap">
+          <div className="conversation-composer">
             <div className="composer-box">
               <textarea
                 ref={taRef}
@@ -462,13 +465,13 @@ function stateLabel(s: string): string {
   const map: Record<string, string> = {
     READY: "Ready", UNDERSTAND: "Understanding", PLAN: "Planning", EXECUTE: "Executing",
     OBSERVE: "Verifying", FIX: "Fixing", EVALUATE: "Evaluating", COMPLETE: "Completed",
-    REVIEW_REQUIRED: "Review required", FAILED: "Failed",
+    REVIEW_REQUIRED: "Review required", FAILED: "Failed", CANCELLED: "Cancelled",
   };
   return map[s] ?? s;
 }
 
 function stateColor(s: string): string {
-  return s === "COMPLETE" ? "var(--green)" : s === "FAILED" ? "var(--red)" : s === "REVIEW_REQUIRED" ? "var(--yellow)" : "var(--accent)";
+  return s === "COMPLETE" ? "var(--green)" : s === "FAILED" || s === "CANCELLED" ? "var(--red)" : s === "REVIEW_REQUIRED" ? "var(--yellow)" : "var(--accent)";
 }
 
 /** Agent reasoning — collapsed by default, expand in place to inspect. */

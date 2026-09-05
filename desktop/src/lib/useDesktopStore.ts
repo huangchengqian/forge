@@ -44,7 +44,7 @@ function createStore() {
         try {
           const env = JSON.parse(ev.data) as EventEnvelope;
           state = { ...state, liveEvents: [...state.liveEvents, env] };
-          if (["TASK_COMPLETED", "TASK_FAILED"].includes(env.type)) {
+          if (["TASK_COMPLETED", "TASK_FAILED", "TASK_CANCELLED"].includes(env.type)) {
             setTimeout(refresh, 200);
           }
         } catch {}
@@ -92,7 +92,7 @@ function createStore() {
         try {
           const env = JSON.parse(ev.data) as EventEnvelope;
           state = { ...state, liveEvents: [...state.liveEvents, env] };
-          if (["TASK_COMPLETED", "TASK_FAILED"].includes(env.type)) {
+          if (["TASK_COMPLETED", "TASK_FAILED", "TASK_CANCELLED"].includes(env.type)) {
             setTimeout(refresh, 200);
           }
         } catch {}
