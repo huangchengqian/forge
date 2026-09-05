@@ -6,6 +6,19 @@ upstream PR material (earendil-works/pi) if we choose to upstream.
 
 ## Issue 1: `<think>` from reasoning models leaks into assistant text (openai-completions)
 
+**Status: FIXED in-repo** (`pi/packages/ai/src/api/openai-completions.ts`).
+The content stream now runs through a small state machine: a *leading*
+`<think>...</think>` segment (DeepSeek-R1 / Qwen / MiniMax / vLLM convention)
+is routed into a `thinking` block with `thinking_delta` stream events instead
+of the text block. Handles tags split across chunk boundaries, holds back
+partial `</think>` prefixes, treats an unclosed `<think>` as thinking, and
+passes mid-text `<think>` mentions through untouched. Tests:
+`packages/ai/test/openai-completions-think-tag.test.ts`. Ready to upstream as-is.
+
+Original draft kept for the record:
+
+### Original draft
+
 **Title**: openai-completions: reasoning embedded as `<think>...</think>` in `delta.content` is not stripped and leaks into assistant text
 
 **Environment**
