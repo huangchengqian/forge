@@ -1,6 +1,6 @@
 {
   "name": "forge",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Autonomous engineering orchestration system. Phase 1 vertical slice.",
