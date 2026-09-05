@@ -87,8 +87,8 @@ requests get the full pipeline.
 
 ## Getting started
 
-Requirements: Node 22+, Rust (for the desktop shell), and **Pi** installed as
-the agent runtime (Pi is a separate project, not vendored here).
+Requirements: Node 22+, Rust (for the desktop shell). The **Pi** runtime is
+vendored at `pi/` and part of this repo — we evolve it directly.
 
 ```bash
 # Desktop app
@@ -124,8 +124,9 @@ product direction in `ROADMAP.md`.
   final `message_end` message is clean. Forge now replaces accumulated deltas
   with the authoritative final text at every consumption point (turn result,
   conversation history, desktop view), so corrupted streaming self-corrects
-  when a message completes. The root cause still lives in the runtime's
-  streaming adapter. `docs/19-PI-UPSTREAM-ISSUES.md` tracks it.
+  when a message completes. The root cause lives in Pi's streaming adapter;
+  since Pi is vendored here we'll fix it at the source — see
+  `docs/19-PI-UPSTREAM-ISSUES.md`.
 - Real-task success rate varies a lot by model; weak agentic models produce
   plans they cannot finish. Verification will catch it, but the task fails.
 

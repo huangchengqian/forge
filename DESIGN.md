@@ -502,15 +502,10 @@ Do not build UI before core lifecycle works.
 
 Rule 2:
 
-Do not modify Pi core initially.
-
-
-Rule 3:
-
 Do not solve architecture problems with prompts.
 
 
-Rule 4:
+Rule 3:
 
 Every autonomous behavior must have:
 
@@ -520,7 +515,7 @@ Every autonomous behavior must have:
 - verification
 
 
-Rule 5:
+Rule 4:
 
 Keep runtime replaceable.
 

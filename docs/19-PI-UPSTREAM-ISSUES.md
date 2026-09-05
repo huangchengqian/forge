@@ -1,4 +1,8 @@
-# Upstream issue drafts for earendil-works/pi
+# Pi runtime issues
+
+Pi is vendored at `pi/` and part of this repo — we evolve it directly. Fix
+these locally where they belong; the drafts below double as ready-made
+upstream PR material (earendil-works/pi) if we choose to upstream.
 
 ## Issue 1: `<think>` from reasoning models leaks into assistant text (openai-completions)
 

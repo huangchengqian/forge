@@ -87,6 +87,13 @@ Runtime decides:
 
 # 4. Runtime Rules
 
+Pi is part of the Forge stack (vendored at `pi/`) and is evolved directly by
+this project. There is no rule forbidding changes to Pi. What must be
+preserved is the boundary below: Forge business logic stays out of Pi core,
+and Forge core depends only on the runtime interface, never on Pi
+implementation. Fixes and features go into Pi where they belong there —
+upstreaming to the original repository is encouraged but optional.
+
 
 ## Rule 4.1
 
