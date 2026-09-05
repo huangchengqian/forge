@@ -7,16 +7,11 @@ export function isTaskTerminal(state: string): boolean {
   return TERMINAL.has(state);
 }
 
-/**
- * Polls the server for pending guard approvals of the watched task and shows
- * them as a floating card stack (bottom-right). Approve/Deny resolve the
- * request; the guard inside Pi then lets the tool proceed or blocks it.
- */
-export function ApprovalCenter({ taskId, baseUrl, token }: {
-  taskId: string | null;
-  baseUrl: string;
-  token: string;
-}) {
+/** Poll the server for pending guard approvals of one task. */
+export function useApprovals(taskId: string | null, baseUrl: string, token: string): {
+  approvals: readonly ApprovalRecord[];
+  decide: (requestId: string, decision: "approve" | "deny", always?: boolean) => Promise<void>;
+} {
   const [approvals, setApprovals] = useState<readonly ApprovalRecord[]>([]);
 
   useEffect(() => {
@@ -55,20 +50,47 @@ export function ApprovalCenter({ taskId, baseUrl, token }: {
     } catch {}
   }
 
-  if (!approvals.length) return null;
+  return { approvals, decide };
+}
+
+/** One approval card — used inline in the conversation and in the floating stack. */
+export function ApprovalCard({ approval, onDecide }: {
+  approval: ApprovalRecord;
+  onDecide: (requestId: string, decision: "approve" | "deny", always?: boolean) => void;
+}) {
+  return (
+    <div style={cardStyle}>
+      <div style={titleStyle}>⚠ {approval.title || "Approval required"}</div>
+      <pre style={msgStyle}>{approval.message}</pre>
+      <div style={btnRow}>
+        <button onClick={() => onDecide(approval.requestId, "deny")} className="btn btn-danger btn-small">Deny</button>
+        <button onClick={() => onDecide(approval.requestId, "approve", true)} className="btn btn-ghost btn-small" title="Approve and remember — this command won't ask again">Always</button>
+        <button onClick={() => onDecide(approval.requestId, "approve")} className="btn btn-primary btn-small">Approve</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Floating card stack (bottom-right) for approvals of the watched task. Used
+ * when no conversation view is open; with a session open, cards render inline
+ * above the composer instead.
+ */
+export function ApprovalCenter({ taskId, baseUrl, token, hidden }: {
+  taskId: string | null;
+  baseUrl: string;
+  token: string;
+  /** The session view renders the same cards inline; suppress the stack there. */
+  hidden?: boolean;
+}) {
+  const { approvals, decide } = useApprovals(taskId, baseUrl, token);
+
+  if (hidden || !approvals.length) return null;
 
   return (
     <div style={stackStyle}>
       {approvals.map((a) => (
-        <div key={a.requestId} style={cardStyle}>
-          <div style={titleStyle}>⚠ {a.title || "Approval required"}</div>
-          <pre style={msgStyle}>{a.message}</pre>
-          <div style={btnRow}>
-            <button onClick={() => decide(a.requestId, "deny")} style={denyBtn}>Deny</button>
-            <button onClick={() => decide(a.requestId, "approve", true)} style={alwaysBtn} title="Approve and remember — this command won't ask again">Always</button>
-            <button onClick={() => decide(a.requestId, "approve")} style={approveBtn}>Approve</button>
-          </div>
-        </div>
+        <ApprovalCard key={a.requestId} approval={a} onDecide={decide} />
       ))}
     </div>
   );
@@ -112,33 +134,4 @@ const msgStyle = {
 
 const btnRow = { display: "flex", justifyContent: "flex-end", gap: 8 };
 
-const denyBtn = {
-  padding: "6px 16px",
-  borderRadius: 5,
-  border: "1px solid var(--red)",
-  backgroundColor: "transparent",
-  color: "var(--text-secondary)",
-  cursor: "pointer",
-  fontSize: 13,
-};
 
-const alwaysBtn = {
-  padding: "6px 16px",
-  borderRadius: 5,
-  border: "1px solid var(--border-strong)",
-  backgroundColor: "transparent",
-  color: "var(--text-secondary)",
-  cursor: "pointer",
-  fontSize: 13,
-};
-
-const approveBtn = {
-  padding: "6px 16px",
-  borderRadius: 5,
-  border: "none",
-  backgroundColor: "var(--accent)",
-  color: "#fff",
-  cursor: "pointer",
-  fontSize: 13,
-  fontWeight: 600,
-};

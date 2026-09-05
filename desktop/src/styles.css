@@ -89,6 +89,17 @@ body {
 }
 .chip .dot { width: 7px; height: 7px; border-radius: 99px; }
 
+/* --- session state dots (sidebar) --- */
+.state-dot { width: 7px; height: 7px; border-radius: 99px; display: inline-block; }
+.state-dot.running {
+  animation: dot-pulse 1.4s ease-in-out infinite;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.78); }
+}
+
 /* --- markdown --- */
 .md { font-size: 14px; line-height: 1.7; color: var(--text-secondary); overflow-wrap: break-word; }
 .md > :first-child { margin-top: 0; }
@@ -333,3 +344,31 @@ body {
 }
 .ctx-menu button:hover { background: var(--bg); color: var(--text); }
 .ctx-menu button.danger { color: var(--red); }
+
+/* --- toasts (task outcomes) --- */
+.toast {
+  background: var(--bg-secondary); border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm); padding: 9px 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+  animation: toast-in 0.18s ease-out;
+}
+.toast[data-tone="ok"] { border-left-color: var(--green); }
+.toast[data-tone="bad"] { border-left-color: var(--red); }
+.toast[data-tone="info"] { border-left-color: var(--yellow); }
+.toast-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.toast-body { font-size: 12px; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- empty state suggestions --- */
+.suggestion-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
+.suggestion-chip {
+  font-family: inherit; font-size: 12.5px; color: var(--text-secondary);
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 99px; padding: 6px 14px; cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.suggestion-chip:hover { border-color: var(--accent); color: var(--text); }

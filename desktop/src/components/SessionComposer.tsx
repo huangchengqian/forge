@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-export function SessionComposer({ onSubmit, focusSignal, leftSlot }: {
+export function SessionComposer({ onSubmit, focusSignal, leftSlot, seed }: {
   onSubmit: (goal: string) => Promise<void>;
   focusSignal?: number;
   /** Optional control rendered at the left of the bottom row (e.g. model picker). */
   leftSlot?: ReactNode;
+  /** External text insertion (e.g. empty-state suggestions): { text, nonce }. */
+  seed?: { text: string; nonce: number };
 }) {
   const [goal, setGoal] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -15,6 +17,12 @@ export function SessionComposer({ onSubmit, focusSignal, leftSlot }: {
   useEffect(() => {
     if (focusSignal !== undefined) inputRef.current?.focus();
   }, [focusSignal]);
+
+  useEffect(() => {
+    if (!seed) return;
+    setGoal(seed.text);
+    inputRef.current?.focus();
+  }, [seed?.nonce]);
 
   async function handleSubmit() {
     const g = goal.trim();

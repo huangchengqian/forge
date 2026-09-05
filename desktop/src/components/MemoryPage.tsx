@@ -36,7 +36,7 @@ export function MemoryPage({ memory, onBack, onDelete, onOpenTask }: {
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 28px 40px" }}>
         <div style={headRow}>
-          <button onClick={onBack} style={backBtn}>← Back</button>
+          <button onClick={onBack} className="btn btn-ghost btn-small">← Back</button>
           <span style={title}>Memory</span>
           <span style={count}>{filtered.length} items</span>
         </div>
@@ -48,7 +48,7 @@ export function MemoryPage({ memory, onBack, onDelete, onOpenTask }: {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search memory…"
-          style={search}
+          className="input" style={{ width: "100%", boxSizing: "border-box" as const }}
         />
 
         {filtered.length === 0 && (
@@ -78,7 +78,7 @@ export function MemoryPage({ memory, onBack, onDelete, onOpenTask }: {
                       </button>
                     ))}
                     <span style={{ flex: 1 }} />
-                    <button onClick={() => handleDelete(m.id)} disabled={deleting === m.id} style={delBtn}>
+                    <button onClick={() => handleDelete(m.id)} disabled={deleting === m.id} className="btn btn-danger btn-small">
                       {deleting === m.id ? "…" : "Delete"}
                     </button>
                   </div>
@@ -97,11 +97,9 @@ function typeColor(t: string): string {
 }
 
 const headRow = { display: "flex", alignItems: "center", gap: 12 };
-const backBtn = { padding: "5px 12px", borderRadius: 6, border: "1px solid var(--border)", backgroundColor: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13 };
 const title = { fontSize: 17, fontWeight: 700, color: "var(--text)", flex: 1 };
 const count = { fontSize: 12, color: "var(--text-muted)" };
 const subtitle = { fontSize: 12.5, color: "var(--text-muted)", margin: "10px 0 16px", lineHeight: 1.5 };
-const search = { width: "100%", boxSizing: "border-box" as const, padding: "8px 12px", borderRadius: 6, border: "1px solid var(--border)", backgroundColor: "var(--bg-secondary)", color: "var(--text)", fontSize: 13, outline: "none" };
 const empty = { color: "var(--text-muted)", fontSize: 13, marginTop: 32, textAlign: "center" as const };
 const groupLabel = { fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.5px", textTransform: "uppercase" as const, marginBottom: 8 };
 const item = { padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border)", backgroundColor: "var(--bg-secondary)", marginBottom: 8 };
@@ -110,4 +108,3 @@ const metaRow = { display: "flex", alignItems: "center", gap: 10, flexWrap: "wra
 const typeTag = { fontFamily: "monospace", fontSize: 10.5, fontWeight: 600 };
 const meta = { fontSize: 11, color: "var(--text-muted)" };
 const taskRefBtn = { padding: "2px 8px", borderRadius: 4, border: "1px solid var(--border)", backgroundColor: "transparent", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontFamily: "monospace" };
-const delBtn = { padding: "3px 10px", borderRadius: 5, border: "1px solid var(--border-strong)", backgroundColor: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 11.5 };

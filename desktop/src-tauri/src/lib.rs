@@ -156,6 +156,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(sidecar_child_slot())
         .append_invoke_initialization_script(&init_js)
         .invoke_handler(tauri::generate_handler![

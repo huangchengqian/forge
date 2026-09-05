@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { TaskSession } from "../shared/types.ts";
 import type { ProjectRecord } from "./ProjectsPage.tsx";
+import { isTaskTerminal } from "./ApprovalCenter.tsx";
 
 export function Sidebar({ projects, activeProjectId, onSelectProject, onAddProject, onNewTask, searchQuery, onSearchChange, sessions, onOpenSession, selectedSessionId, onSettings, settingsActive, theme, onToggleTheme, onDeleteSession, onRenameSession, onOpenMemory }: {
   projects: readonly ProjectRecord[];
@@ -111,7 +112,9 @@ export function Sidebar({ projects, activeProjectId, onSelectProject, onAddProje
                   onClick={() => { if (!isRenaming) onOpenSession(s.id); }}
                   onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, taskId: s.id }); }}
                   className={`session-item ${s.id === selectedSessionId ? "selected" : ""}`}>
-                  <span style={{ flexShrink: 0, display: "flex" }}><span style={{ width: 7, height: 7, borderRadius: 99, display: "inline-block", background: stateColor(s.state) }} /></span>
+                  <span style={{ flexShrink: 0, display: "flex" }}>
+                    <span className={`state-dot ${isTaskTerminal(s.state) ? "" : "running"}`} style={{ background: stateColor(s.state) }} />
+                  </span>
                   {s.kind === "conversation" && <span className="kind-tag">chat</span>}
                   {isRenaming ? (
                     <input

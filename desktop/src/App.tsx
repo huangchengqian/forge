@@ -2,13 +2,15 @@ import { useEffect, useState } from "react";
 import { useDesktop } from "./lib/useDesktopStore.ts";
 import { initClient, getConfig, saveConfig, testConnection, switchSubscription, deleteMemory as deleteMemoryApi } from "./lib/desktop-client.ts";
 import type { ProviderCheckResult, ForgeConfigData, ProviderConfig } from "./lib/desktop-client.ts";
+import { setToastSink, type Toast } from "./lib/notify.ts";
 import { Sidebar } from "./components/Sidebar.tsx";
 import type { ProjectRecord } from "./components/ProjectsPage.tsx";
 import { SettingsPage } from "./components/SettingsPage.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { SessionComposer } from "./components/SessionComposer.tsx";
 import { MemoryPage } from "./components/MemoryPage.tsx";
-import { ApprovalCenter, isTaskTerminal } from "./components/ApprovalCenter.tsx";
+import { CommandPalette } from "./components/CommandPalette.tsx";
+import { ApprovalCenter, isTaskTerminal, useApprovals } from "./components/ApprovalCenter.tsx";
 
 declare global {
   interface Window {
@@ -30,6 +32,8 @@ export function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [composerFocus, setComposerFocus] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -40,13 +44,16 @@ export function App() {
     localStorage.setItem("forge-theme", theme);
   }, [theme]);
 
-  // Keyboard shortcuts: ⌘N new task, ⌘F focus search, Esc back/close.
+  // Keyboard shortcuts: ⌘N new task, ⌘K palette, ⌘F focus search, Esc back/close.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "n") {
         e.preventDefault();
         newTask();
+      } else if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowPalette((v) => !v);
       } else if (mod && e.key.toLowerCase() === "f") {
         e.preventDefault();
         document.getElementById("session-search")?.focus();
@@ -58,6 +65,22 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // Toast host: the notify module pushes task-outcome toasts here.
+  useEffect(() => {
+    setToastSink((t) => {
+      setToasts((prev) => [...prev.slice(-3), t]);
+      setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== t.id)), 5000);
+    });
+    return () => setToastSink(() => {});
+  }, []);
+
+  // One approvals poller at the app level: cards render inline in the
+  // conversation when a session is open, floating otherwise.
+  const approvalTaskId = store.state.selectedTaskId
+    ?? store.state.tasks.find((t) => !isTaskTerminal(t.state))?.id
+    ?? null;
+  const { approvals, decide } = useApprovals(approvalTaskId, cfg.baseUrl, cfg.token);
 
   async function loadAll() {
     try {
@@ -127,6 +150,7 @@ export function App() {
   }
 
   const selectedTask = store.state.tasks.find((t) => t.id === store.state.selectedTaskId);
+  const showSessionView = !showMemory && !showSettings && !!selectedTask;
 
   const scopedSessions = activeProjectId
     ? store.state.tasks.filter((t) => t.projectId === activeProjectId)
@@ -178,6 +202,8 @@ export function App() {
         ) : store.state.selectedTaskId && selectedTask ? (
           <SessionView task={selectedTask} memory={store.state.memory} liveEvents={store.state.liveEvents}
             providers={configData?.providers ?? []}
+            approvals={approvalTaskId === selectedTask.id ? approvals : undefined}
+            onDecide={decide}
             onSend={async (msg) => { await store.sendMessage(selectedTask.id, msg); }}
             onSwitchModel={async (providerId) => { await switchSubscription(selectedTask.id, providerId); await store.refreshTasks(); }} />
         ) : (
@@ -192,10 +218,36 @@ export function App() {
       </main>
 
       <ApprovalCenter
-        taskId={store.state.selectedTaskId ?? store.state.tasks.find((t) => !isTaskTerminal(t.state))?.id ?? null}
+        taskId={approvalTaskId}
         baseUrl={cfg.baseUrl}
         token={cfg.token}
+        hidden={showSessionView}
       />
+
+      <CommandPalette
+        open={showPalette}
+        onClose={() => setShowPalette(false)}
+        sessions={scopedSessions}
+        actions={[
+          { id: "new-task", label: "+ New task", hint: "⌘N", run: newTask },
+          { id: "settings", label: "Open settings", run: () => { setShowMemory(false); setShowSettings(true); } },
+          { id: "memory", label: "Open memory", run: () => { setShowSettings(false); setShowMemory(true); store.select(""); } },
+          { id: "theme", label: "Toggle theme", run: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
+        ]}
+        onPickSession={openSession}
+      />
+
+      {/* Task outcome toasts (bottom-left) */}
+      {toasts.length > 0 && (
+        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 5000, display: "flex", flexDirection: "column", gap: 8, maxWidth: 360 }}>
+          {toasts.map((t) => (
+            <div key={t.id} className="toast" data-tone={t.tone}>
+              <div className="toast-title">{t.title}</div>
+              {t.body && <div className="toast-body">{t.body}</div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -208,6 +260,12 @@ function EmptyWorkspace({ focusSignal, activeProjectName, providers, defaultProv
   onSubmit: (goal: string, providerId?: string) => Promise<void>;
 }) {
   const [providerId, setProviderId] = useState<string | null>(defaultProviderId ?? providers[0]?.id ?? null);
+  const [seed, setSeed] = useState<{ text: string; nonce: number }>({ text: "", nonce: 0 });
+  const suggestions = [
+    "Create a TypeScript utility module with unit tests",
+    "Fix all ESLint errors in this project",
+    "Write a README section describing the architecture",
+  ];
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ width: "100%", maxWidth: 640 }}>
@@ -220,6 +278,7 @@ function EmptyWorkspace({ focusSignal, activeProjectName, providers, defaultProv
         <SessionComposer
           onSubmit={(goal) => onSubmit(goal, providerId ?? undefined)}
           focusSignal={focusSignal}
+          seed={seed}
           leftSlot={providers.length > 0 ? (
             <select value={providerId ?? ""} onChange={(e) => setProviderId(e.target.value || null)} className="composer-model-select">
               {providers.map((p) => (
@@ -228,6 +287,13 @@ function EmptyWorkspace({ focusSignal, activeProjectName, providers, defaultProv
             </select>
           ) : undefined}
         />
+        <div className="suggestion-row">
+          {suggestions.map((s) => (
+            <button key={s} className="suggestion-chip" onClick={() => setSeed((prev) => ({ text: s, nonce: prev.nonce + 1 }))}>
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

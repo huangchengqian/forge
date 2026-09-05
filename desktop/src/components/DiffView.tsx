@@ -6,8 +6,10 @@ export type DiffFile = { path: string; oldPath: string; lines: DiffLine[]; adds:
 export function parseUnifiedDiff(diff: string): DiffFile[] {
   const files: DiffFile[] = [];
   let cur: DiffFile | null = null;
-  let oldNo = 0;
-  let newNo = 0;
+  // Line numbers are corrected by the first @@ hunk header; start at 1 so
+  // synthesized diffs (no hunks) number naturally.
+  let oldNo = 1;
+  let newNo = 1;
 
   const flush = () => {
     if (cur) files.push(cur);

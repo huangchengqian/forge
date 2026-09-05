@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { TaskSession, MemoryItem, Plan } from "../shared/types.ts";
 import type { EventEnvelope, DiffResult, ProviderConfig } from "../lib/desktop-client.ts";
 import { fetchDiff, undoTask, cancelTask } from "../lib/desktop-client.ts";
-import { isTaskTerminal } from "./ApprovalCenter.tsx";
+import { isTaskTerminal, ApprovalCard } from "./ApprovalCenter.tsx";
+import type { ApprovalRecord } from "../lib/desktop-client.ts";
 import { Markdown } from "./Markdown.tsx";
 import { DiffView } from "./DiffView.tsx";
 
@@ -11,17 +12,40 @@ type UsedMemoryEntry = { type: string; content: string; confidence: number };
 type ChatItem =
   | { kind: "agent"; text: string }
   | { kind: "think"; text: string }
-  | { kind: "tool"; name: string; detail: string; status: "running" | "done" | "error" | "pending"; summary: string }
+  | { kind: "tool"; name: string; detail: string; status: "running" | "done" | "error" | "pending"; summary: string; diff?: ToolDiffInfo }
   | { kind: "status"; text: string; tone: "info" | "ok" | "bad" }
   | { kind: "memory"; memories: UsedMemoryEntry[] };
+
+type ToolDiffInfo = { path: string; edits: Array<{ oldText: string; newText: string }> };
+
+/** Extract a renderable diff from write/edit tool input, if applicable. */
+function toolDiffInfo(name: string | undefined, input: unknown): ToolDiffInfo | undefined {
+  const o = (input ?? {}) as Record<string, any>;
+  if (name === "write") {
+    const path = String(o.file_path ?? o.path ?? "");
+    if (!path || typeof o.content !== "string") return undefined;
+    return { path, edits: [{ oldText: "", newText: o.content }] };
+  }
+  if (name === "edit") {
+    const path = String(o.path ?? "");
+    if (!path || !Array.isArray(o.edits)) return undefined;
+    const edits = o.edits
+      .filter((e: any) => e && typeof e === "object")
+      .map((e: any) => ({ oldText: String(e.oldText ?? ""), newText: String(e.newText ?? "") }));
+    if (edits.length === 0) return undefined;
+    return { path, edits };
+  }
+  return undefined;
+}
 
 const THINK_RE = /<\s*think\s*>([\s\S]*?)<\/\s*think\s*>/g;
 
 /**
- * Split an assistant message into thinking segments and visible text. Models
- * like MiniMax/DeepSeek emit reasoning as a leading <think>...</think> block
- * inside the content stream; we render those as a collapsible card instead of
- * dumping them into the conversation as ordinary agent text.
+ * Split legacy assistant text into thinking segments and visible text.
+ * Historical replays (and any runtime that still leaks tags) carry reasoning
+ * as a leading <think>...</think> block inside the content; pi-ai now routes
+ * tag-based reasoning into thinking blocks itself, so the live path arrives as
+ * thinking_delta events (handled separately) — this remains for old replays.
  */
 function splitThink(text: string): Array<{ kind: "think" | "agent"; text: string }> {
   const parts: Array<{ kind: "think" | "agent"; text: string }> = [];
@@ -44,6 +68,7 @@ function splitThink(text: string): Array<{ kind: "think" | "agent"; text: string
 function toChat(events: readonly EventEnvelope[]): ChatItem[] {
   const items: ChatItem[] = [];
   let agentBuf = "";
+  let thinkBuf = "";
   let pendingTool: ChatItem | null = null;
 
   const flushAgent = () => {
@@ -54,9 +79,18 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
       agentBuf = "";
     }
   };
+  // Reasoning that arrives as thinking_delta events (pi routes tag-based and
+  // field-based reasoning here); legacy <think> text tags still handled above.
+  const flushThink = () => {
+    if (thinkBuf.trim()) {
+      items.push({ kind: "think", text: thinkBuf.trim() });
+      thinkBuf = "";
+    }
+  };
   const flushTool = () => {
     if (pendingTool) { items.push(pendingTool); pendingTool = null; }
   };
+  const flushAll = () => { flushAgent(); flushThink(); flushTool(); };
 
   for (const e of events) {
     if (e.type === "AGENT_EVENT") {
@@ -65,12 +99,13 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
       if (pe.type === "message_update") {
         flushTool();
         const ame = pe.assistantMessageEvent as { type?: string; delta?: string } | undefined;
-        if (ame?.type === "text_delta" && typeof ame.delta === "string") agentBuf += ame.delta;
+        if (ame?.type === "text_delta" && typeof ame.delta === "string") { flushThink(); agentBuf += ame.delta; }
+        else if (ame?.type === "thinking_delta" && typeof ame.delta === "string") { flushAgent(); thinkBuf += ame.delta; }
       } else if (pe.type === "message_end") {
         // Authoritative final text replaces the accumulated deltas: some
         // providers stream CJK text with character reordering while the
         // final message is clean, so the visible text self-corrects here.
-        flushTool();
+        flushAll();
         const msg = pe.message as { role?: string; content?: Array<{ type?: string; text?: string }> } | undefined;
         if (msg?.role === "assistant" && Array.isArray(msg.content)) {
           const text = msg.content.filter((b) => b?.type === "text").map((b) => b.text ?? "").join("");
@@ -78,55 +113,59 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
         }
       } else if (pe.type === "tool_call") {
         flushAgent();
-        pendingTool = { kind: "tool", name: String(pe.toolName ?? "tool"), summary: humanTool(pe.toolName, pe.input), detail: toolDetail(pe.toolName, pe.input), status: "pending" };
+        pendingTool = { kind: "tool", name: String(pe.toolName ?? "tool"), summary: humanTool(pe.toolName, pe.input), detail: toolDetail(pe.toolName, pe.input), status: "pending", diff: toolDiffInfo(pe.toolName as string, pe.input) };
       } else if (pe.type === "tool_execution_start") {
         flushAgent();
-        pendingTool = { kind: "tool", name: String(pe.toolName ?? "tool"), summary: humanTool(pe.toolName, pe.args), detail: toolDetail(pe.toolName, pe.args), status: "running" };
+        pendingTool = { kind: "tool", name: String(pe.toolName ?? "tool"), summary: humanTool(pe.toolName, pe.args), detail: toolDetail(pe.toolName, pe.args), status: "running", diff: toolDiffInfo(pe.toolName as string, pe.args) };
       } else if (pe.type === "tool_execution_end") {
         flushAgent();
-        items.push({ kind: "tool", name: String(pe.toolName ?? "tool"), summary: humanTool(pe.toolName, pe.args), detail: toolResult(pe.result), status: pe.isError ? "error" : "done" });
+        items.push({ kind: "tool", name: String(pe.toolName ?? "tool"), summary: humanTool(pe.toolName, pe.args), detail: toolResult(pe.result), status: pe.isError ? "error" : "done", diff: toolDiffInfo(pe.toolName as string, pe.args) });
       } else if (pe.type === "user_message") {
-        flushAgent(); flushTool();
+        flushAll();
         items.push({ kind: "status", text: String(pe.text ?? ""), tone: "info" });
       } else if (pe.type === "turn_error") {
-        flushAgent(); flushTool();
+        flushAll();
         items.push({ kind: "status", text: String(pe.error ?? "turn failed"), tone: "bad" });
       }
     } else if (e.type === "MEMORY_USED") {
-      flushAgent(); flushTool();
+      flushAll();
       const mems = (e.payload.memories ?? []) as UsedMemoryEntry[];
       if (mems.length > 0) items.push({ kind: "memory", memories: mems });
     } else if (e.type === "STEP_STARTED") {
-      flushAgent(); flushTool();
+      flushAll();
       items.push({ kind: "status", text: String(e.payload.intent ?? e.payload.stepId ?? "step"), tone: "info" });
     } else if (e.type === "OBSERVATION_CREATED") {
-      flushAgent(); flushTool();
+      flushAll();
       const p = e.payload as { result?: string; failureReason?: string };
       const ok = p.result === "PASS";
       items.push({ kind: "status", text: ok ? "✓ Verified" : `✗ ${p.failureReason ?? "verification failed"}`, tone: ok ? "ok" : "bad" });
     } else if (e.type === "FIX_STARTED") {
-      flushAgent(); flushTool();
+      flushAll();
       items.push({ kind: "status", text: "Fixing…", tone: "info" });
     } else if (e.type === "TASK_COMPLETED") {
-      flushAgent(); flushTool();
+      flushAll();
       items.push({ kind: "status", text: "Completed", tone: "ok" });
     } else if (e.type === "TASK_FAILED") {
-      flushAgent(); flushTool();
+      flushAll();
       items.push({ kind: "status", text: "Failed", tone: "bad" });
     } else if (e.type === "TASK_CANCELLED") {
-      flushAgent(); flushTool();
+      flushAll();
       items.push({ kind: "status", text: "Cancelled", tone: "bad" });
     }
   }
-  flushAgent(); flushTool();
+  flushAll();
   return items;
 }
 
-type Usage = { input: number; output: number; cost: number };
+type Usage = { lastInput: number; totalOutput: number; cost: number };
 
-/** Aggregate token usage across assistant messages in the event stream. */
+/**
+ * Aggregate token usage across assistant messages in the event stream.
+ * `lastInput` (input + cache of the newest assistant message) approximates
+ * the current context occupancy; `totalOutput` accumulates across messages.
+ */
 function sumUsage(events: readonly EventEnvelope[]): Usage {
-  const total: Usage = { input: 0, output: 0, cost: 0 };
+  const total: Usage = { lastInput: 0, totalOutput: 0, cost: 0 };
   for (const e of events) {
     if (e.type !== "AGENT_EVENT") continue;
     const pe = e.payload.piEvent as Record<string, any> | undefined;
@@ -134,8 +173,10 @@ function sumUsage(events: readonly EventEnvelope[]): Usage {
     const msg = pe.message as { role?: string; usage?: Record<string, any> } | undefined;
     if (msg?.role !== "assistant" || !msg.usage || typeof msg.usage !== "object") continue;
     const u = msg.usage;
-    total.input += num(u.input) + num(u.cacheRead) + num(u.cacheWrite);
-    total.output += num(u.output);
+    const input = num(u.input) + num(u.cacheRead) + num(u.cacheWrite);
+    const output = num(u.output);
+    total.lastInput = input;
+    total.totalOutput += output;
     total.cost += num(u.cost?.total);
   }
   return total;
@@ -191,11 +232,13 @@ function modelLabel(baseUrl: string): string {
   return known[baseUrl] ?? "Custom";
 }
 
-export function SessionView({ task, memory, liveEvents, providers, onSend, onSwitchModel }: {
+export function SessionView({ task, memory, liveEvents, providers, approvals, onDecide, onSend, onSwitchModel }: {
   task: TaskSession;
   memory: readonly MemoryItem[];
   liveEvents: readonly EventEnvelope[];
   providers: readonly ProviderConfig[];
+  approvals?: readonly ApprovalRecord[];
+  onDecide?: (requestId: string, decision: "approve" | "deny", always?: boolean) => void;
   onSend?: (message: string) => Promise<void>;
   onSwitchModel?: (providerId: string) => Promise<void>;
 }) {
@@ -211,13 +254,25 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
   const [stopping, setStopping] = useState(false);
   const streamEndRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Only follow the stream while the user is already at (or near) the bottom —
+  // scrolling up to read history must not be yanked back by incoming deltas.
+  const stickToBottomRef = useRef(true);
 
   useEffect(() => {
-    streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (!stickToBottomRef.current) return;
+    streamEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [liveEvents.length]);
+
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
 
   useEffect(() => {
     let alive = true;
+    stickToBottomRef.current = true;
     setDiff(null); setUndoMsg(null);
     void fetchDiff(task.id).then((d) => { if (alive) setDiff(d); }).catch(() => {});
     return () => { alive = false; };
@@ -297,15 +352,15 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
           <span className="dot" style={{ background: stateColor(task.state) }} />
           {stateLabel(task.state)}
         </span>
-        {usage.input + usage.output > 0 && (
-          <span className="chip" title={`${fmtTokens(usage.input)} input · ${fmtTokens(usage.output)} output tokens`}>
-            {fmtTokens(usage.input)} → {fmtTokens(usage.output)} tok
+        {usage.lastInput + usage.totalOutput > 0 && (
+          <span className="chip" title={`Context ≈ ${usage.lastInput.toLocaleString()} tokens (latest turn input) · ${usage.totalOutput.toLocaleString()} output tokens total`}>
+            ctx {fmtTokens(usage.lastInput)} · out {fmtTokens(usage.totalOutput)}
             {usage.cost > 0.0005 && ` · $${usage.cost.toFixed(2)}`}
           </span>
         )}
       </div>
 
-      <div className="conversation-scroll">
+      <div className="conversation-scroll" ref={scrollRef} onScroll={handleScroll}>
         <div className="conversation-canvas">
           {/* User message */}
           <div className="message message-user">
@@ -323,12 +378,28 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
               </div>
               {planOpen && (
                 <div style={{ marginTop: 6 }}>
-                  {task.plan.steps.map((s) => (
-                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", fontSize: 13 }}>
-                      <span style={{ color: stepColor(s.status) }}>{stepIcon(s.status)}</span>
-                      <span style={{ color: "var(--text-secondary)" }}>{s.intent}</span>
-                    </div>
-                  ))}
+                  {task.plan.steps.map((s) => {
+                    const evidence = task.observations.filter((o) => o.stepId === s.id);
+                    return (
+                      <div key={s.id} style={{ padding: "3px 0" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                          <span style={{ color: stepColor(s.status) }}>{stepIcon(s.status)}</span>
+                          <span style={{ color: "var(--text-secondary)" }}>{s.intent}</span>
+                          {s.attempts > 1 && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>×{s.attempts}</span>}
+                        </div>
+                        {evidence.length > 0 && (
+                          <div style={{ margin: "2px 0 4px 20px" }}>
+                            {evidence.map((o) => (
+                              <div key={o.id} style={{ fontSize: 11.5, lineHeight: 1.5, padding: "1px 0", color: o.result === "PASS" ? "var(--green)" : "var(--red)" }}>
+                                {o.result === "PASS" ? "✓" : "✗"} evidence · attempt {o.attempt}
+                                {o.failureReason && <span style={{ color: "var(--text-muted)" }}> — {o.failureReason}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -361,7 +432,9 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
                   <span className="caret">{open ? "▾" : "▸"}</span>
                   <span style={{ ...toolTag, background: toolColor(it.status) }}>{toolIcon(it.status)}</span>
                   <span className="tool-summary">{it.summary}</span>
-                  {open && <pre style={toolDetailPre}>{it.detail}</pre>}
+                  {open && (it.diff
+                    ? <div className="tool-diff" onClick={(e) => e.stopPropagation()}><ToolDiff diff={it.diff} /></div>
+                    : <pre style={toolDetailPre}>{it.detail}</pre>)}
                 </div>
               );
             }
@@ -406,6 +479,14 @@ export function SessionView({ task, memory, liveEvents, providers, onSend, onSwi
       {onSend && (
         <div className="conversation-composer-wrap">
           <div className="conversation-composer">
+            {/* Pending guard approvals — inline where the decision is needed. */}
+            {approvals && approvals.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 10 }}>
+                {approvals.map((a) => (
+                  <ApprovalCard key={a.requestId} approval={a} onDecide={(id, d, always) => onDecide?.(id, d, always)} />
+                ))}
+              </div>
+            )}
             <div className="composer-box">
               <textarea
                 ref={taRef}
@@ -459,6 +540,34 @@ function PlanProgress({ plan }: { plan: Plan }) {
       {done}/{plan.steps.length} steps
     </span>
   );
+}
+
+/** Inline colored diff for write/edit tool calls, rendered where the JSON dump used to be. */
+function ToolDiff({ diff }: { diff: ToolDiffInfo }) {
+  return (
+    <div style={{ width: "100%", margin: "6px 0 0 24px", display: "flex", flexDirection: "column", gap: 10 }}>
+      {diff.edits.map((edit, i) => {
+        const text = synthesizeDiff(diff.path, edit.oldText, edit.newText, diff.edits.length > 1 ? `edit #${i + 1}` : undefined);
+        return <DiffView key={i} diff={text} />;
+      })}
+    </div>
+  );
+}
+
+/** Build a minimal unified diff (per-file, all del/add lines) from raw before/after text. */
+function synthesizeDiff(path: string, oldText: string, newText: string, label?: string): string {
+  const lines: string[] = [
+    `diff --git a/${path} b/${path}${label ? ` (${label})` : ""}`,
+    `--- a/${path}`,
+    `+++ b/${path}`,
+  ];
+  if (oldText.length > 0) {
+    for (const l of oldText.split("\n")) lines.push(`-${l}`);
+  }
+  if (newText.length > 0) {
+    for (const l of newText.split("\n")) lines.push(`+${l}`);
+  }
+  return lines.join("\n");
 }
 
 function stateLabel(s: string): string {
