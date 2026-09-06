@@ -434,7 +434,6 @@ describe("TaskManager Phase 9.7 routing", () => {
   });
 });
 
-describe("TaskManager mid-run steering", () => {
   /** Runtime whose prompt blocks until released — simulates a long-running task. */
   class HangingRuntime extends FakeRuntime {
     private releases: Array<() => void> = [];
@@ -451,6 +450,8 @@ describe("TaskManager mid-run steering", () => {
       for (const r of this.releases.splice(0)) r();
     }
   }
+
+describe("TaskManager mid-run steering", () => {
 
   function makeHangingManager(rt: HangingRuntime): Manager {
     return new TaskManager({
@@ -515,5 +516,42 @@ describe("TaskManager mid-run steering", () => {
     assert.ok(settled);
     const done = await r;
     assert.equal(done.ok, true);
+  });
+});
+
+describe("TaskManager effort persistence", () => {
+  test("setEffort persists on the task record and getEffort falls back to it", async () => {
+    const rt = new HangingRuntime(TMP, { steps: [] } as never);
+    const m = new TaskManager({
+      bus: new EventBus(),
+      forgeHome: TMP,
+      runtimeKind: "fake",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-opus-4-8",
+      maxConcurrency: undefined,
+      supervisor: new RuntimeSupervisor(() => {}),
+      projects,
+      approvalHub: new ApprovalHub(),
+      intentRouter: { classify: async () => ({ kind: "task" }) },
+      runtime: rt,
+    });
+    const { taskId } = await m.create({ goal: "long task", projectId: projectA.id });
+    for (let i = 0; i < 50 && !m.isActive(taskId); i++) await new Promise((r) => setTimeout(r, 10));
+
+    const r = await m.setEffort(taskId, "high");
+    assert.equal(r.ok, true);
+
+    // Persisted on the task record (survives restarts).
+    const { loadTask } = await import("../core/persistence/task-store.ts");
+    const t = await loadTask(taskId);
+    assert.equal(t?.model.effort, "high");
+
+    // A recreated session reports no live effort → the persisted value wins.
+    (rt as unknown as { effort: string | undefined }).effort = undefined;
+    const e = await m.getEffort(taskId);
+    assert.equal(e.current, "high");
+
+    rt.releaseAll();
+    await m.whenSettled(taskId);
   });
 });

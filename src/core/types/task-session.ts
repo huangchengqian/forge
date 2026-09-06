@@ -35,6 +35,8 @@ export type TaskSession = {
   model: {
     provider: string;
     modelId: string;
+    /** Persisted reasoning effort ("off"…"max"); applied when a session is (re)created. */
+    effort?: string;
   };
   fixCount: number;
   createdAt: number;
