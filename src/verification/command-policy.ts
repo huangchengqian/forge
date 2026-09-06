@@ -17,8 +17,39 @@ const REGISTERED_CHECKS: readonly RegExp[] = [
 ];
 
 export type CommandDecision =
-  | { allowed: true; source: "registered" | "guard" }
+  | { allowed: true; source: "registered" | "readonly" | "guard" }
   | { allowed: false; reason: string };
+
+/**
+ * Binaries that only read and never write. Models habitually verify artifacts
+ * with `cat`/`ls`/`grep`-style reads; without an allowance those burn the
+ * whole FIX budget on "verification command denied" while the artifact itself
+ * was correct. Each segmented command must consist solely of these.
+ */
+const READ_ONLY_BINARIES = new Set([
+  "cat", "ls", "head", "tail", "wc", "stat", "file", "grep", "diff", "du", "test", "[",
+]);
+
+/** find subcommands that execute or delete — never read-only. */
+const FORBIDDEN_FIND_FLAGS = new Set(["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fork"]);
+
+/** Anything that spawns, substitutes, redirects, or sequences escapes the read-only analysis. */
+const UNSAFE_SHELL_CHARS = /[;&<>`$(){}]/;
+
+export function isReadOnlyVerification(command: string): boolean {
+  const normalized = command.trim();
+  if (!normalized || UNSAFE_SHELL_CHARS.test(normalized)) return false;
+  for (const segment of normalized.split("|")) {
+    const words = segment.trim().split(/\s+/);
+    if (!words[0] || !READ_ONLY_BINARIES.has(words[0])) return false;
+    for (const arg of words.slice(1)) {
+      if (arg.startsWith("/")) return false; // absolute paths may read outside the workspace
+      if (arg.split("/").includes("..")) return false; // no upward path escapes
+      if (words[0] === "find" && FORBIDDEN_FIND_FLAGS.has(arg)) return false;
+    }
+  }
+  return true;
+}
 
 export function resolveWithinWorkspace(workspace: string, path: string | undefined): string {
   if (!path) return resolve(workspace);
@@ -40,6 +71,9 @@ export function decideCommand(command: string): CommandDecision {
   const normalized = command.trim();
   if (REGISTERED_CHECKS.some((pattern) => pattern.test(normalized))) {
     return { allowed: true, source: "registered" };
+  }
+  if (isReadOnlyVerification(normalized)) {
+    return { allowed: true, source: "readonly" };
   }
   const decision = evaluateToolCall(loadPolicy(defaultPolicyPath()), "bash", { command: normalized });
   if (decision.action === "allow") return { allowed: true, source: "guard" };
