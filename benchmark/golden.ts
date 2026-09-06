@@ -251,6 +251,62 @@ export const GOLDEN_TASKS: readonly GoldenTask[] = [
     },
   },
   {
+    id: "K-stuck-guard",
+    category: "recovery",
+    title: "Stuck-loop guard fails fast on an impossible step",
+    goal: "Create a lock file that can never be created",
+    buildPlanner: () =>
+      new StaticPlanner([
+        {
+          id: "step-1",
+          intent: "create impossible.lock",
+          status: "pending",
+          attempts: 0,
+          dependencies: [],
+          executionGroup: undefined,
+          successCriteria: [
+            { kind: "file_exists", path: "impossible.lock" },
+          ],
+        },
+      ]),
+    // perform never satisfies the criterion: every observation fails with the
+    // same signature, so the stuck-loop guard must fail the task after two
+    // wasted fix rounds instead of burning all 10.
+    perform: async () => {},
+    expectedState: "FAILED",
+  },
+  {
+    id: "L-mixed-criteria",
+    category: "new-feature",
+    title: "Kitchen-sink step: five criterion kinds in one verification",
+    goal: "Create release/readme.md describing the fast mode, keep legacyMode out, and verify with cat",
+    buildPlanner: () =>
+      new StaticPlanner([
+        {
+          id: "step-1",
+          intent: "create release/readme.md describing the fast mode",
+          status: "pending",
+          attempts: 0,
+          dependencies: [],
+          executionGroup: undefined,
+          successCriteria: [
+            { kind: "directory_exists", path: "release" },
+            { kind: "file_exists", path: "release/readme.md" },
+            { kind: "file_contains", path: "release/readme.md", pattern: "fast" },
+            { kind: "file_not_contains", path: "release/readme.md", pattern: "legacyMode" },
+            { kind: "command_exit_zero", command: "cat release/readme.md" },
+          ],
+        },
+      ]),
+    perform: async (_stepId, workspace) => {
+      await writeWorkspaceFile(
+        workspace,
+        join("release", "readme.md"),
+        "# Release notes\n\nThe fast mode is the default.\n",
+      );
+    },
+  },
+  {
     id: "G-verify-command",
     category: "new-feature",
     title: "Create src/notes.md verified through a read-only command",
@@ -410,3 +466,4 @@ export async function writeTextFile(path: string, content: string): Promise<void
 }
 
 export { ScriptedRuntime };
+

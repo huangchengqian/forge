@@ -9,6 +9,7 @@ export function computeTaskMetrics(args: {
   events: readonly PersistedEvent[];
   runtimeStats: RuntimeStats;
   wallMs: number;
+  expectedState?: string;
 }): TaskMetrics {
   const { final, events, runtimeStats, wallMs } = args;
 
@@ -25,11 +26,13 @@ export function computeTaskMetrics(args: {
   const verificationFailures = final.observations.filter((o) => o.result === "FAIL").length;
   const planRevisions = events.filter((e) => e.type === "PLAN_REVISED").length;
 
+  const expectedState = args.expectedState ?? "COMPLETE";
   return {
     taskId: final.id,
     benchId: args.benchId,
     category: args.category,
-    success: final.state === "COMPLETE",
+    expectedState,
+    success: final.state === expectedState,
     finalState: final.state,
     wallMs,
     retries,

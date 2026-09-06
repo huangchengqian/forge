@@ -96,6 +96,7 @@ export async function runGoldenTask(args: {
     events,
     runtimeStats: runtime.stats,
     wallMs,
+    expectedState: task.expectedState,
   });
 
   console.log(

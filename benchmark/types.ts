@@ -1,7 +1,7 @@
 import type { Planner } from "../src/orchestrator/planner.ts";
 import type { TaskSession } from "../src/core/types/task-session.ts";
 
-export type GoldenCategory = "new-feature" | "bug-fix" | "refactor" | "test-addition" | "config-change" | "adaptive-planning";
+export type GoldenCategory = "new-feature" | "bug-fix" | "refactor" | "test-addition" | "config-change" | "adaptive-planning" | "recovery";
 
 export type GoldenTask = {
   id: string;
@@ -10,6 +10,12 @@ export type GoldenTask = {
   goal: string;
   buildPlanner: (workspace: string) => Planner;
   perform: (stepId: string, workspace: string, attempt: number) => Promise<void>;
+  /**
+   * Outcome the benchmark should expect. Defaults to "COMPLETE"; set to
+   * "FAILED" for goldens that exercise protection paths (stuck-loop guard,
+   * budget exhaustion) so a designed-to-fail run still counts as success.
+   */
+  expectedState?: "FAILED";
 };
 
 export type RuntimeStats = {
@@ -31,6 +37,7 @@ export type TaskMetrics = {
   runtimeFailures: number;
   evaluationScore: number | null;
   evaluationStatus: string | null;
+  expectedState: string;
 };
 
 export type BenchmarkSummary = {
