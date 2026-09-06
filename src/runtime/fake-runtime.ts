@@ -7,6 +7,7 @@ import type {
   PromptOptions,
   RuntimeSession,
   TurnResult,
+  RuntimeState,
 } from "./interface.ts";
 import type { SuccessCriterion } from "../core/types/criterion.ts";
 
@@ -77,7 +78,7 @@ export class FakeRuntime implements AgentRuntime {
     this.effort = level;
   }
 
-  async getRuntimeState(_session: RuntimeSession): Promise<{ effort?: string; contextWindow?: number }> {
+  async getRuntimeState(_session: RuntimeSession): Promise<RuntimeState> {
     return { effort: this.effort, contextWindow: 100_000 };
   }
 

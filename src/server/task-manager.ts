@@ -644,7 +644,7 @@ export class TaskManager {
     return { runtime: entry.runtime, session: entry.session };
   }
 
-  async getEffort(taskId: string): Promise<{ levels: string[]; current?: string; contextWindow?: number }> {
+  async getEffort(taskId: string): Promise<{ levels: string[]; current?: string | undefined; contextWindow?: number | undefined }> {
     const { runtime, session } = this.requireEntry(taskId);
     const levels = runtime.getEffortOptions ? await runtime.getEffortOptions(session) : [];
     const state = runtime.getRuntimeState ? await runtime.getRuntimeState(session) : {};

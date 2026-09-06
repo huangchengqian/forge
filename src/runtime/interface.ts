@@ -32,6 +32,12 @@ export type CreateSessionOptions = {
   env: Record<string, string> | undefined;
 };
 
+/** Live runtime facts for a session, as reported by getRuntimeState. */
+export type RuntimeState = {
+  effort?: string | undefined;
+  contextWindow?: number | undefined;
+};
+
 export interface AgentRuntime {
   createSession(opts: CreateSessionOptions): Promise<RuntimeSession>;
   prompt(session: RuntimeSession, message: string, opts?: PromptOptions): Promise<TurnResult>;
@@ -51,7 +57,7 @@ export interface AgentRuntime {
    * Live runtime facts for the session: current effort and the model's
    * context window size (tokens). Backs the desktop context gauge.
    */
-  getRuntimeState?(session: RuntimeSession): Promise<{ effort?: string; contextWindow?: number }>;
+  getRuntimeState?(session: RuntimeSession): Promise<RuntimeState>;
   /**
    * Manually compact the session context. Runtimes without compaction omit
    * this method.

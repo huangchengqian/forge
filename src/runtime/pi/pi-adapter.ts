@@ -7,6 +7,7 @@ import type {
   RuntimeModel,
   RuntimeSession,
   TurnResult,
+  RuntimeState,
 } from "../interface.ts";
 import { PiRpcClient, type PiEvent } from "./pi-rpc-client.ts";
 import { spawnPi, type PiProcess } from "./pi-process.ts";
@@ -161,7 +162,7 @@ export class PiRuntime implements AgentRuntime {
     await pi.client.setThinkingLevel(level);
   }
 
-  async getRuntimeState(session: RuntimeSession): Promise<{ effort?: string; contextWindow?: number }> {
+  async getRuntimeState(session: RuntimeSession): Promise<RuntimeState> {
     const pi = session as PiRuntimeSession;
     const state = await pi.client.getState();
     if (!state.success || !state.data || typeof state.data !== "object") return {};
