@@ -576,6 +576,11 @@ points at `main` with no commits is noise. Merge back once the release gate
 passes; delete the branch after merging.
 
 
+Run the gate as a STANDALONE step and check its result before merging or
+pushing — never chain it with `&&`/pipes into the merge itself (a piped
+gate loses its exit code, and a wrong working directory silently skips it).
+
+
 
 ---
 
