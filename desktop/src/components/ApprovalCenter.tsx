@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ApprovalRecord } from "../lib/desktop-client.ts";
 
-const TERMINAL = new Set(["COMPLETE", "FAILED", "REVIEW_REQUIRED", "CANCELLED"]);
-
-export function isTaskTerminal(state: string): boolean {
-  return TERMINAL.has(state);
-}
+export { isTaskTerminal } from "../shared/state-labels.ts";
 
 /** Poll the server for pending guard approvals of one task. */
 export function useApprovals(taskId: string | null, baseUrl: string, token: string): {

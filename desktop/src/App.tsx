@@ -159,7 +159,7 @@ export function App() {
   const filteredSessions = q ? scopedSessions.filter((s) => s.goal.toLowerCase().includes(q) || s.id.includes(q)) : scopedSessions;
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", backgroundColor: "var(--bg)", color: "var(--text)" }}>
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", backgroundColor: "var(--bg-sidebar)", color: "var(--text)" }}>
       <Sidebar
         projects={projects}
         activeProjectId={activeProjectId}
@@ -180,7 +180,7 @@ export function App() {
         onOpenMemory={() => { setShowSettings(false); setShowMemory(true); store.select(""); }}
       />
 
-      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <main className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {showMemory ? (
           <MemoryPage
             memory={store.state.memory}

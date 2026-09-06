@@ -56,13 +56,15 @@ export function Sidebar({ projects, activeProjectId, onSelectProject, onAddProje
 
   return (
     <div className="sidebar">
-      <div className="sidebar-logo">Forge</div>
+      {/* Drag row: macOS traffic lights overlay this area; no logo text. */}
+      <div className="sidebar-drag" data-tauri-drag-region="" />
 
-      {/* Project Switcher */}
-      <div style={{ position: "relative", marginBottom: 6 }}>
-        <button onClick={() => setSwitcherOpen((v) => !v)} className="input" style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: "var(--bg)" }}>
-          <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeName}</span>
-          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>▾</span>
+      {/* Project section */}
+      <div className="side-section-label">Project</div>
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <button onClick={() => setSwitcherOpen((v) => !v)} className="side-trigger">
+          <span className="side-trigger-name">{activeName}</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
         </button>
         {switcherOpen && (
           <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, zIndex: 100, backgroundColor: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: 6, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
@@ -96,11 +98,16 @@ export function Sidebar({ projects, activeProjectId, onSelectProject, onAddProje
       </div>
 
       {/* Actions */}
-      <button onClick={onNewTask} className="sidebar-row-btn">+ New Task</button>
-      <input id="session-search" value={searchQuery} onChange={(e) => onSearchChange(e.target.value)} placeholder="Search  (⌘F)" className="input" style={{ width: "100%", boxSizing: "border-box", margin: "4px 0 10px" }} />
+      <input id="session-search" value={searchQuery} onChange={(e) => onSearchChange(e.target.value)} placeholder="Search  (⌘F)" className="input side-search" />
 
       {/* Sessions */}
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <div className="side-header-row">
+          <div className="side-section-label">Sessions</div>
+          <button className="side-add-btn" title="New session  (⌘N)" onClick={onNewTask}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+        </div>
         {groups.length === 0 && <div style={{ color: "var(--text-muted)", fontSize: 12, padding: "4px 8px" }}>No sessions</div>}
         {groups.map((g) => (
           <div key={g.label} style={{ marginBottom: 4 }}>
@@ -143,12 +150,18 @@ export function Sidebar({ projects, activeProjectId, onSelectProject, onAddProje
         ))}
       </div>
 
-      {/* Theme + Settings */}
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, marginTop: 8, display: "flex", gap: 4 }}>
-        <button onClick={onToggleTheme} title="Toggle theme" className="sidebar-row-btn" style={{ width: 34, padding: "7px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {/* Bottom: Settings left, theme toggle right */}
+      <div className="side-bottom">
+        <button onClick={onSettings} className="side-bottom-btn" style={{ background: settingsActive ? "var(--bg-secondary)" : "transparent" }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          Settings
+        </button>
+        <button onClick={onToggleTheme} title="Toggle theme" className="side-bottom-btn side-icon-btn">
           {theme === "dark" ? <SunIcon /> : <MoonIcon />}
         </button>
-        <button onClick={onSettings} className="sidebar-row-btn" style={{ flex: 1, background: settingsActive ? "var(--bg-secondary)" : "transparent" }}>Settings</button>
       </div>
 
       {/* Context menu (right-click on a session) */}

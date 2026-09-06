@@ -11,6 +11,7 @@ type UsedMemoryEntry = { type: string; content: string; confidence: number };
 
 type ChatItem =
   | { kind: "agent"; text: string }
+  | { kind: "user"; text: string }
   | { kind: "think"; text: string }
   | { kind: "tool"; name: string; detail: string; status: "running" | "done" | "error" | "pending"; summary: string; diff?: ToolDiffInfo }
   | { kind: "status"; text: string; tone: "info" | "ok" | "bad" }
@@ -102,10 +103,11 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
         if (ame?.type === "text_delta" && typeof ame.delta === "string") { flushThink(); agentBuf += ame.delta; }
         else if (ame?.type === "thinking_delta" && typeof ame.delta === "string") { flushAgent(); thinkBuf += ame.delta; }
       } else if (pe.type === "message_end") {
-        // Authoritative final text replaces the accumulated deltas: some
-        // providers stream CJK text with character reordering while the
-        // final message is clean, so the visible text self-corrects here.
-        flushAll();
+        // Authoritative final text REPLACES the accumulated deltas (not
+        // appends): the CJK self-correct depends on it, so flush pending
+        // thinking/tool cards but never the agent text buffer itself —
+        // flushing it here would render the reply twice (deltas + final).
+        flushThink(); flushTool();
         const msg = pe.message as { role?: string; content?: Array<{ type?: string; text?: string }> } | undefined;
         if (msg?.role === "assistant" && Array.isArray(msg.content)) {
           const text = msg.content.filter((b) => b?.type === "text").map((b) => b.text ?? "").join("");
@@ -121,8 +123,10 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
         flushAgent();
         items.push({ kind: "tool", name: String(pe.toolName ?? "tool"), summary: humanTool(pe.toolName, pe.args), detail: toolResult(pe.result), status: pe.isError ? "error" : "done", diff: toolDiffInfo(pe.toolName as string, pe.args) });
       } else if (pe.type === "user_message") {
+        // Follow-up user messages get the same right-aligned bubble as the
+        // session's opening goal — user input is always a bubble.
         flushAll();
-        items.push({ kind: "status", text: String(pe.text ?? ""), tone: "info" });
+        items.push({ kind: "user", text: String(pe.text ?? "") });
       } else if (pe.type === "turn_error") {
         flushAll();
         items.push({ kind: "status", text: String(pe.error ?? "turn failed"), tone: "bad" });
@@ -346,8 +350,10 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div className="session-head">
-        <span className="session-head-title">{task.goal || "(untitled)"}</span>
+      {/* The app header doubles as the title bar (Overlay titleBarStyle on
+          macOS): make it a window drag region. */}
+      <div className="session-head" data-tauri-drag-region="">
+        <span className="session-head-title" data-tauri-drag-region="">{task.goal || "(untitled)"}</span>
         <span className="chip" title={task.state}>
           <span className="dot" style={{ background: stateColor(task.state) }} />
           {stateLabel(task.state)}
@@ -362,9 +368,8 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
 
       <div className="conversation-scroll" ref={scrollRef} onScroll={handleScroll}>
         <div className="conversation-canvas">
-          {/* User message */}
+          {/* User message — right-aligned bubble, no avatar/name */}
           <div className="message message-user">
-            <div className="message-meta"><span className="message-avatar">你</span><span>你的任务</span></div>
             <div className="message-user-body">{task.goal}</div>
           </div>
 
@@ -405,13 +410,19 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
             </div>
           )}
 
-          {/* Agent activity */}
+          {/* Agent activity — plain full-width text, no bubble/avatar */}
           {items.map((it, i) => {
+            if (it.kind === "user") {
+              return (
+                <div key={i} className="message message-user">
+                  <div className="message-user-body">{it.text}</div>
+                </div>
+              );
+            }
             if (it.kind === "agent") {
               const isLast = streaming && i === items.length - 1;
               return (
                 <div key={i} className="message message-agent">
-                  <div className="message-meta"><span className="message-avatar agent-avatar">F</span><span>Forge</span></div>
                   <div style={isLast ? { display: "inline" } : undefined}>
                     <Markdown text={it.text} />
                     {isLast && <span className="stream-caret" />}
@@ -521,7 +532,7 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
                   </button>
                 )}
                 <button onClick={handleSend} disabled={!draft.trim() || sending} className="btn btn-primary btn-small" style={{ marginLeft: "auto" }}>
-                  {sending ? "…" : "Send"}
+                  {sending ? "Sending…" : "Send"}
                 </button>
               </div>
             </div>

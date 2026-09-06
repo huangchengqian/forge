@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { streamUrl, fetchTaskList, fetchMemory, createTask, sendMessage, deleteSession as deleteSessionApi, renameTask } from "./desktop-client.ts";
 import type { EventEnvelope } from "./desktop-client.ts";
 import type { TaskSession, MemoryItem } from "../shared/types.ts";
+import { isTaskTerminal } from "../shared/state-labels.ts";
 import { notifyTaskOutcome } from "./notify.ts";
 
 export type DesktopState = {
@@ -35,8 +36,13 @@ function createStore() {
     state = { ...state, liveEvents: [...state.liveEvents, ...batch.map((b) => b.env)] };
     for (const { env, taskId } of batch) {
       if (env.type === "TASK_COMPLETED" || env.type === "TASK_FAILED" || env.type === "TASK_CANCELLED") {
-        const goal = state.tasks.find((t) => t.id === taskId)?.goal ?? "";
-        notifyTaskOutcome(taskId, goal, env.type === "TASK_COMPLETED" ? "completed" : env.type === "TASK_CANCELLED" ? "cancelled" : "failed");
+        // Opening an old session replays its history through the same SSE
+        // stream — only notify when the task was previously known to be
+        // still running, so replayed terminal events stay silent.
+        const prev = state.tasks.find((t) => t.id === taskId);
+        if (prev && !isTaskTerminal(prev.state)) {
+          notifyTaskOutcome(taskId, prev.goal, env.type === "TASK_COMPLETED" ? "completed" : env.type === "TASK_CANCELLED" ? "cancelled" : "failed");
+        }
       }
     }
     if (batch.some((b) => ["TASK_COMPLETED", "TASK_FAILED", "TASK_CANCELLED"].includes(b.env.type))) {

@@ -34,3 +34,9 @@ export function stateDescription(state: TaskState): string {
     default: return state;
   }
 }
+
+const TERMINAL_STATES = new Set(["COMPLETE", "FAILED", "REVIEW_REQUIRED", "CANCELLED"]);
+
+export function isTaskTerminal(state: TaskState): boolean {
+  return TERMINAL_STATES.has(state);
+}
