@@ -615,6 +615,13 @@ export class TaskManager {
     const session = handle.session;
     const controller = new AbortController();
     handle.abortSignal = controller.signal;
+    // Re-apply the persisted reasoning effort to the freshly created session
+    // (best-effort: a runtime without effort support resumes unchanged).
+    if (task.model.effort && handle.runtime.setEffort) {
+      try {
+        await handle.runtime.setEffort(session, task.model.effort);
+      } catch { /* non-fatal */ }
+    }
     const runPromise = runOrchestrator(handle)
       .then((final) => {
         this.settle(taskId, final);
@@ -658,13 +665,24 @@ export class TaskManager {
     const { runtime, session } = this.requireEntry(taskId);
     const levels = runtime.getEffortOptions ? await runtime.getEffortOptions(session) : [];
     const state = runtime.getRuntimeState ? await runtime.getRuntimeState(session) : {};
-    return { levels, current: state.effort, contextWindow: state.contextWindow };
+    // Live session value wins; fall back to the task-persisted effort so the
+    // answer survives runtime restarts (a recreated session applied nothing).
+    const task = await loadTask(taskId);
+    return { levels, current: state.effort ?? task?.model.effort, contextWindow: state.contextWindow };
   }
 
   async setEffort(taskId: string, level: string): Promise<{ ok: boolean; message: string }> {
     const { runtime, session } = this.requireEntry(taskId);
     if (!runtime.setEffort) return { ok: false, message: "runtime does not support effort control" };
     await runtime.setEffort(session, level);
+    // Persist on the task record so resume re-applies it to a recreated
+    // session.
+    const task = await loadTask(taskId);
+    if (task) {
+      task.model.effort = level;
+      task.updatedAt = Date.now();
+      await saveTask(task);
+    }
     return { ok: true, message: "effort set" };
   }
 
