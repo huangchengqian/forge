@@ -66,3 +66,31 @@ test("identical consecutive verification failures short-circuit the FIX loop", a
   assert.match(final.failureReason ?? "", /stuck: identical verification failure repeated/);
   assert.match(final.failureReason ?? "", /file_exists/);
 });
+
+test("escaped runtime errors settle the task FAILED instead of rejecting", async () => {
+  await rm(TMP, { recursive: true, force: true });
+  const runtime = new FakeRuntime(TMP, {
+    steps: [{ intent: "boom step", criteria: [{ kind: "file_exists", path: "out.txt" }] }],
+  });
+  runtime.prompt = async () => {
+    throw new Error("agent_settled deadline exceeded");
+  };
+  const handle = await startTask({
+    runtime,
+    taskId: "escape-test",
+    provider: "fake",
+    modelId: "fake",
+    env: {},
+    eventBus: undefined,
+    deadlineMs: 45_000,
+    policy: { maxFixesPerTask: 10, maxAttemptsPerStep: 3 },
+    workspace: join(TMP, "workspace"),
+  });
+  handle.task.goal = "escaped error";
+
+  // runOrchestrator must NOT reject (an unobserved rejection would crash the
+  // server) — the error settles the task FAILED instead.
+  const final = await runOrchestrator(handle);
+  assert.equal(final.state, "FAILED");
+  assert.match(final.failureReason ?? "", /orchestrator error: agent_settled deadline exceeded/);
+});

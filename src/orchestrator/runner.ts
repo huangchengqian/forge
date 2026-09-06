@@ -56,25 +56,22 @@ export async function runStepBatch(
   };
   await saveTask(partial);
 
-  const settled = await Promise.allSettled(
-    steps.map(async (s) => {
-      const prompt = buildStepPrompt(s, partial.goal, partial.directory);
+  // Steps in a batch share ONE runtime session, and the runtime serializes
+  // prompts (a single agent answers in order). Marking every step "running"
+  // up front advertised parallelism that did not exist and showed a wrong
+  // currentStepId; run them strictly one at a time so the projected state is
+  // truthful. Task-level parallelism (separate sessions) is unaffected.
+  const results: StepRunResult[] = [];
+  for (const s of steps) {
+    const prompt = buildStepPrompt(s, partial.goal, partial.directory);
+    try {
       const turn = await runtime.prompt(session, prompt, { deadlineMs: 5 * 60_000 });
-      return { stepId: s.id, success: turn.success, error: turn.error };
-    }),
-  );
-
-  // The orchestrator owns the terminal state transition; return without a
-  // second snapshot write so it can persist CANCELLED at the next boundary.
-  if (abortSignal?.aborted) return { task: partial, results: [] };
-
-  const results: StepRunResult[] = settled.map((r, i) => {
-    const s = steps[i]!;
-    if (r.status === "rejected") {
-      return { stepId: s.id, success: false, error: String(r.reason) };
+      results.push({ stepId: s.id, success: turn.success, error: turn.error });
+    } catch (err) {
+      results.push({ stepId: s.id, success: false, error: err instanceof Error ? err.message : String(err) });
     }
-    return r.value;
-  });
+    if (abortSignal?.aborted) return { task: partial, results };
+  }
 
   await saveTask(partial);
   return { task: partial, results };
