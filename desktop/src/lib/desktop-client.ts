@@ -97,6 +97,30 @@ export async function cancelTask(taskId: string): Promise<void> {
   if (!r.ok) throw new Error(`POST cancel → ${r.status}`);
 }
 
+export type EffortState = { levels: string[]; current?: string; contextWindow?: number };
+
+export async function getEffort(taskId: string): Promise<EffortState> {
+  return getJson<EffortState>(`/tasks/${taskId}/effort`);
+}
+
+export async function setEffort(taskId: string, level: string): Promise<void> {
+  const r = await fetch(`${cfg!.baseUrl}/tasks/${taskId}/effort`, {
+    method: "POST",
+    headers: { ...headers(), "content-type": "application/json" },
+    body: JSON.stringify({ level }),
+  });
+  if (!r.ok) throw new Error(`POST effort → ${r.status}`);
+}
+
+export async function compactTask(taskId: string, instructions?: string): Promise<void> {
+  const r = await fetch(`${cfg!.baseUrl}/tasks/${taskId}/compact`, {
+    method: "POST",
+    headers: { ...headers(), "content-type": "application/json" },
+    body: JSON.stringify(instructions ? { instructions } : {}),
+  });
+  if (!r.ok) throw new Error(`POST compact → ${r.status}`);
+}
+
 export async function renameTask(taskId: string, goal: string): Promise<void> {
   const r = await fetch(`${cfg!.baseUrl}/tasks/${taskId}/rename`, {
     method: "POST",

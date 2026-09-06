@@ -192,6 +192,24 @@ export class PiRpcClient {
     if (!res.success) throw new Error(res.error ?? "steer failed");
   }
 
+  /** Reasoning-effort levels the session's model supports. */
+  async getAvailableThinkingLevels(): Promise<string[]> {
+    const res = await this.sendAsync("get_available_thinking_levels");
+    if (!res.success) throw new Error(res.error ?? "get_available_thinking_levels failed");
+    return (res.data as { levels?: string[] })?.levels ?? [];
+  }
+
+  async setThinkingLevel(level: string): Promise<void> {
+    const res = await this.sendAsync("set_thinking_level", { level });
+    if (!res.success) throw new Error(res.error ?? "set_thinking_level failed");
+  }
+
+  /** Manually compact the session context. */
+  async compact(customInstructions?: string): Promise<void> {
+    const res = await this.sendAsync("compact", customInstructions ? { customInstructions } : {});
+    if (!res.success) throw new Error(res.error ?? "compact failed");
+  }
+
   /**
    * Switch the session's model mid-flight. Pi's `set_model` resolves against
    * its available-model snapshot (all providers declared in models.json), so

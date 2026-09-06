@@ -245,6 +245,43 @@ async function handleRequest(
     return;
   }
 
+  if (req.method === "GET" && parts[0] === "tasks" && parts[2] === "effort" && parts.length === 3) {
+    try {
+      json(res, 200, await manager.getEffort(parts[1]!));
+    } catch (err) {
+      json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && parts[0] === "tasks" && parts[2] === "effort" && parts.length === 3) {
+    const body = await readBody(req);
+    const level = typeof body.level === "string" ? body.level : "";
+    if (!level) {
+      json(res, 400, { error: "level is required" });
+      return;
+    }
+    try {
+      const result = await manager.setEffort(parts[1]!, level);
+      json(res, result.ok ? 200 : 409, result);
+    } catch (err) {
+      json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && parts[0] === "tasks" && parts[2] === "compact" && parts.length === 3) {
+    const body = await readBody(req);
+    const instructions = typeof body.instructions === "string" ? body.instructions : undefined;
+    try {
+      const result = await manager.compact(parts[1]!, instructions);
+      json(res, result.ok ? 200 : 409, result);
+    } catch (err) {
+      json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
   if (req.method === "DELETE" && parts[0] === "tasks" && parts.length === 2) {
     const result = await manager.deleteTask(parts[1]!);
     json(res, result.ok ? 200 : 409, result);

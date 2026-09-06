@@ -65,6 +65,27 @@ export class FakeRuntime implements AgentRuntime {
     this.steeredCalls.push(message);
   }
 
+  effort: string | undefined;
+  readonly effortOptions = ["off", "minimal", "low", "medium", "high"];
+
+  async getEffortOptions(_session: RuntimeSession): Promise<string[]> {
+    return [...this.effortOptions];
+  }
+
+  async setEffort(_session: RuntimeSession, level: string): Promise<void> {
+    if (!this.effortOptions.includes(level)) throw new Error(`unknown effort: ${level}`);
+    this.effort = level;
+  }
+
+  async getRuntimeState(_session: RuntimeSession): Promise<{ effort?: string; contextWindow?: number }> {
+    return { effort: this.effort, contextWindow: 100_000 };
+  }
+
+  compactCalls = 0;
+  async compact(_session: RuntimeSession, _instructions?: string): Promise<void> {
+    this.compactCalls++;
+  }
+
   async abort(_session: RuntimeSession): Promise<void> {
     this.abortCalls++;
   }

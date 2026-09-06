@@ -636,6 +636,35 @@ export class TaskManager {
     return { resumed: true, message: `resumed from ${task.state}${lost}` };
   }
 
+  // --- session controls: reasoning effort + context compaction ---
+
+  private requireEntry(taskId: string): { runtime: AgentRuntime; session: RuntimeSession } {
+    const entry = this.idle.get(taskId) ?? this.active.get(taskId);
+    if (!entry) throw new Error("no active or idle session for this task");
+    return { runtime: entry.runtime, session: entry.session };
+  }
+
+  async getEffort(taskId: string): Promise<{ levels: string[]; current?: string; contextWindow?: number }> {
+    const { runtime, session } = this.requireEntry(taskId);
+    const levels = runtime.getEffortOptions ? await runtime.getEffortOptions(session) : [];
+    const state = runtime.getRuntimeState ? await runtime.getRuntimeState(session) : {};
+    return { levels, current: state.effort, contextWindow: state.contextWindow };
+  }
+
+  async setEffort(taskId: string, level: string): Promise<{ ok: boolean; message: string }> {
+    const { runtime, session } = this.requireEntry(taskId);
+    if (!runtime.setEffort) return { ok: false, message: "runtime does not support effort control" };
+    await runtime.setEffort(session, level);
+    return { ok: true, message: "effort set" };
+  }
+
+  async compact(taskId: string, instructions?: string): Promise<{ ok: boolean; message: string }> {
+    const { runtime, session } = this.requireEntry(taskId);
+    if (!runtime.compact) return { ok: false, message: "runtime does not support compaction" };
+    await runtime.compact(session, instructions);
+    return { ok: true, message: "compacted" };
+  }
+
   async cancel(taskId: string): Promise<{ cancelled: boolean; message: string }> {
     const t = await loadTask(taskId);
     if (!t) return { cancelled: false, message: "no such task" };
