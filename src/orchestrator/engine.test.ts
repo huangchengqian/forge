@@ -62,7 +62,7 @@ test("identical consecutive verification failures short-circuit the FIX loop", a
 
   const final = await runOrchestrator(handle);
   assert.equal(final.state, "FAILED");
-  assert.equal(final.fixCount, 1, "must stop after a single fix round, not burn the budget");
+  assert.equal(final.fixCount, 2, "must stop after two wasted fix rounds, not burn the budget");
   assert.match(final.failureReason ?? "", /stuck: identical verification failure repeated/);
   assert.match(final.failureReason ?? "", /file_exists/);
 });

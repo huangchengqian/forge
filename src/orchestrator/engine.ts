@@ -473,16 +473,20 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
             emitStateChange(bus, task, from, task.state);
           }
         } else {
-          // Stuck-loop guard: when the two most recent observations of the
-          // failing step failed for the IDENTICAL reason, a FIX round cannot
-          // learn anything new — fail now with a precise reason instead of
-          // burning the remaining FIX budget on identical retries.
-          const stepFailures = task.observations.filter((o) => o.result === "FAIL" && justRun.some((s) => s.id === o.stepId));
-          const lastTwo = stepFailures.slice(-2);
+          // Stuck-loop guard: when two consecutive POST-FIX observations
+          // (attempt >= 2) of the failing step fail with the IDENTICAL
+          // signature, the fix rounds are not learning — fail now with a
+          // precise reason instead of burning the remaining budget.
+          // Pre-fix investigation rounds (attempt 1) are legitimately allowed
+          // to repeat (e.g. a golden that investigates before fixing).
+          const postFixFailures = task.observations.filter(
+            (o) => o.result === "FAIL" && o.attempt >= 2 && justRun.some((s) => s.id === o.stepId),
+          );
+          const lastTwo = postFixFailures.slice(-2);
           if (
             lastTwo.length === 2 &&
             failureSignature(lastTwo[0]!) === failureSignature(lastTwo[1]!) &&
-            task.fixCount > 0
+            task.fixCount >= 2
           ) {
             task = await failTask(
               task,
