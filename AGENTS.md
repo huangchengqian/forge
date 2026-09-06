@@ -552,6 +552,31 @@ Prefer:
 
 
 
+## Branch discipline
+
+
+`main` is always releasable: every push runs the release gate in CI, and
+`scripts/release-check.sh` must pass before merging anything into it.
+
+
+Work on a short-lived branch (`feat/…`, `fix/…`) when the change:
+
+
+- crosses layers or touches the runtime interface contract
+- spans multiple sessions, or may stay unfinished for a while
+- is an experiment, or a behavior/policy change worth reviewing in isolation
+
+
+Small, obviously-green changes (copy, styling, docs, focused bug fixes) go
+directly to `main` — branch ceremony on those is friction, not safety.
+
+
+Branches are created when the work starts, never in advance: a branch that
+points at `main` with no commits is noise. Merge back once the release gate
+passes; delete the branch after merging.
+
+
+
 ---
 
 # 13. First Development Goal
