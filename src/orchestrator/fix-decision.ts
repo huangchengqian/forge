@@ -1,5 +1,6 @@
 import type { Observation, PlanStep } from "../core/types/step.ts";
 import type { SuccessCriterion } from "../core/types/criterion.ts";
+import { VERIFICATION_GUIDANCE } from "./instruction.ts";
 
 export type FixAction = {
   step: PlanStep;
@@ -71,6 +72,7 @@ export function decideFix(
     `Working directory: ${workingDirectory}\n` +
     `Previous failures:\n${summary}\n` +
     `Success criteria to satisfy:\n${step.successCriteria.map((c) => `  - ${describeCriterion(c)}`).join("\n")}\n` +
+    `${VERIFICATION_GUIDANCE}\n` +
     `Apply the smallest possible fix. Do not change unrelated files. ` +
     `After fixing, output exactly one line: DONE ${step.id}`;
 

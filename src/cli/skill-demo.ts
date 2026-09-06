@@ -58,7 +58,8 @@ async function main() {
   fake.prompt = async (session, message, opts) => {
     const r = await origPrompt(session, message, opts);
     const m = message.match(/([\w-]+\.ts)\b/);
-    if (m && m[1] && !message.includes("tsc")) {
+    // The typecheck step's intent is "run tsc to verify…" — don't write then.
+    if (m && m[1] && !message.includes("run tsc")) {
       const p = join(taskDir, m[1]);
       await writeFile(p, 'export function util(): string {\n  return "ok";\n}\n', "utf8");
     }

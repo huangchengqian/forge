@@ -514,7 +514,7 @@ async function runOrchestratorLoop(
           ) {
             task = await failTask(
               task,
-              `${lastTwo[1]!.stepId} stuck: identical verification failure repeated after ${task.fixCount} fix(es): ${lastTwo[1]!.failureReason ?? failureSignature(lastTwo[1]!)}`,
+              `${lastTwo[1]!.stepId} stuck: identical verification failure repeated after ${task.fixCount} fix(es): ${lastTwo[1]!.failureReason ?? failureSignature(lastTwo[1]!)} (hint: verification commands are restricted — on resume, verify with project runners like npm test, or read-only commands like cat/ls)`,
               bus,
             );
             break;
