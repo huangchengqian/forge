@@ -31,6 +31,7 @@ const { randomUUID } = await import("node:crypto");
 import type { TaskSession } from "../core/types/task-session.ts";
 
 type Manager = InstanceType<typeof TaskManager>;
+type ManagerOptions = ConstructorParameters<typeof TaskManager>[0];
 type Registry = InstanceType<typeof ProjectsRegistry>;
 
 const PROJECT_DIR = join(TMP, "project-a");
@@ -40,6 +41,7 @@ function makeManager(
   forgeHome = TMP,
   runtimeKind: "fake" | "pi" = "fake",
   intentRouter?: { classify: (input: string) => Promise<{ kind: "conversation"; reply: string } | { kind: "task" }> },
+  chat?: ManagerOptions["chat"],
 ): Manager {
   return new TaskManager({
     bus: new EventBus(),
@@ -52,6 +54,7 @@ function makeManager(
     projects,
     approvalHub: new ApprovalHub(),
     ...(intentRouter ? { intentRouter } : {}),
+    ...(chat ? { chat } : {}),
   });
 }
 
@@ -363,8 +366,8 @@ describe("TaskManager resume after schema v3 (A-2 migration guard)", () => {
 describe("TaskManager Phase 9.7 routing", () => {
   test("conversation intent → lightweight record: no plan, no runtime, no workspace lock", async () => {
     const m = makeManager(projects, TMP, "fake", {
-      classify: async () => ({ kind: "conversation", reply: "你好！有什么可以帮你？" }),
-    });
+      classify: async () => ({ kind: "conversation", reply: "hi" }),
+    }, async () => "你好！有什么可以帮你？");
     const { taskId } = await m.create({ goal: "你好", projectId: projectA.id });
     const task = await m.get(taskId);
     assert.ok(task);
@@ -377,7 +380,8 @@ describe("TaskManager Phase 9.7 routing", () => {
     assert.equal(task.workspacePath, PROJECT_DIR);
     // Conversation never enters the active set: no run promise, no lock held.
     assert.equal(m.whenSettled(taskId), null);
-    // Reply is streamed into the event log as agent text.
+    // Reply is streamed into the event log as agent text (background turn).
+    await m.whenConversationReplySettled(taskId);
     const { readEvents } = await import("../core/persistence/event-log.ts");
     const events = await readEvents(taskId);
     const text = events
@@ -405,12 +409,13 @@ describe("TaskManager Phase 9.7 routing", () => {
       classify: async () => ({ kind: "conversation", reply: "hi" }),
     });
     const { taskId } = await m.create({ goal: "hello", projectId: projectA.id });
-    // No forge-config.json in the test home → the chat channel reports the
-    // missing provider instead of "no active or idle session", proving the
-    // conversation branch was taken without a Pi runtime.
+    // No forge-config.json in the test home → the background chat channel
+    // records a turn_error about the missing provider instead of failing the
+    // message call, proving the conversation branch was taken without a Pi
+    // runtime and without blocking the caller.
     const r = await m.message(taskId, "继续聊聊");
-    assert.equal(r.ok, false);
-    assert.match(r.message, /provider configured/);
+    assert.equal(r.ok, true);
+    await m.whenConversationReplySettled(taskId);
     const { readEvents } = await import("../core/persistence/event-log.ts");
     const events = await readEvents(taskId);
     const hasUser = events.some(
@@ -418,5 +423,11 @@ describe("TaskManager Phase 9.7 routing", () => {
         (e.payload?.piEvent as { type?: string })?.type === "user_message",
     );
     assert.ok(hasUser);
+    const turnError = events.find(
+      (e) => e.type === "AGENT_EVENT" &&
+        (e.payload?.piEvent as { type?: string; error?: string })?.type === "turn_error",
+    );
+    assert.ok(turnError);
+    assert.match(String((turnError!.payload?.piEvent as { error?: string }).error), /provider configured/);
   });
 });

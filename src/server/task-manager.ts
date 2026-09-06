@@ -26,12 +26,13 @@ import { appendRule, ruleFromApproval } from "../guard/policy.ts";
 import { syncCustomModels, piAgentDir, providerName } from "./pi-models.ts";
 import {
   classifyIntent,
-  conversationReply,
+  conversationReplyStream,
   endpointFromConfig,
   replayConversationHistory,
   type ChatMessage,
   type IntentResult,
 } from "./intent-router.ts";
+import type { ProviderEndpoint } from "./provider-api.ts";
 
 /** Typed error so the HTTP layer can map create/resume failures to status codes. */
 export class CreateTaskError extends Error {
@@ -70,6 +71,8 @@ export type TaskManagerOptions = {
   approvalHub: ApprovalHub;
   /** Injectable Phase 9.7 router (tests); defaults to the server mini completion. */
   intentRouter?: { classify: (input: string) => Promise<IntentResult> };
+  /** Injectable chat channel (tests); answers conversation turns without a provider. */
+  chat?: (endpoint: ProviderEndpoint, system: string, messages: readonly ChatMessage[]) => Promise<string>;
 };
 
 type ActiveEntry = {
@@ -111,6 +114,8 @@ export class TaskManager {
   private idle = new Map<string, ActiveEntry>();
   /** Advisory per-workspace lock: resolved absolute path → taskId. In-memory only. */
   private workspaceLocks = new Map<string, string>();
+  /** In-flight background conversation replies: taskId → completion promise. */
+  private conversationReplies = new Map<string, Promise<void>>();
   readonly recovery = new TaskRecoveryService();
 
   constructor(private readonly opts: TaskManagerOptions) {}
@@ -258,21 +263,21 @@ export class TaskManager {
       intent = { kind: "task" };
     }
     if (intent.kind === "conversation") {
-      return this.createConversation(input, cfg, intent.reply);
+      return this.createConversation(input, cfg);
     }
     return this.createEngineeringTask(input);
   }
 
   /**
    * Conversation path: no workspace lock, no git head capture, no Pi runtime,
-   * no task workspace, no state machine. The router already produced the
-   * reply; we persist a lightweight kind=conversation record and stream the
-   * reply into its event log so the desktop renders it like any agent text.
+   * no task workspace, no state machine. We persist a lightweight
+   * kind=conversation record, return the taskId immediately, and stream the
+   * reply into the event log in the background so the desktop can select the
+   * session and render the reply live instead of waiting for the model.
    */
   private async createConversation(
     input: { goal: string; projectId?: string },
     cfg: Awaited<ReturnType<typeof loadForgeConfig>>,
-    reply: string,
   ): Promise<{ taskId: string }> {
     const project = await this.resolveProject(input.projectId);
     const taskId = newTaskId();
@@ -305,17 +310,59 @@ export class TaskManager {
     };
     await saveTask(task);
     await appendEvent(taskId, "TASK_CREATED", { goal: task.goal, modelProvider: provider, modelId });
-    // Assistant reply, framed as the Pi text event the desktop renders as an
-    // agent message. The opening user message is NOT duplicated here — the
-    // session view renders the goal as the user block already.
-    await appendEvent(taskId, "AGENT_EVENT", {
-      piEvent: {
-        type: "message_update",
-        assistantMessageEvent: { type: "text_delta", delta: reply },
-      },
-    });
-    await appendEvent(taskId, "TASK_COMPLETED", { observations: 0 });
+    // The opening user message is NOT duplicated as an event — the session
+    // view renders the goal as the user block already.
+    this.streamConversationReply(taskId, endpointFromConfig(cfg), [], input.goal.trim());
     return { taskId };
+  }
+
+  /**
+   * Conversation reply runner: streams the model reply into the task's event
+   * log as text_delta events (FIFO-ordered) and closes with an authoritative
+   * message_end. Runs in the background — create/message return before the
+   * model answers, and the desktop follows the log via SSE.
+   */
+  private streamConversationReply(
+    taskId: string,
+    endpoint: ProviderEndpoint | null,
+    history: readonly ChatMessage[],
+    userText: string,
+  ): Promise<void> {
+    const run = (async () => {
+      try {
+        if (!endpoint && !this.opts.chat) throw new Error("no provider configured for conversation replies");
+        // endpoint may be null here only when an injected chat is present
+        // (tests), which never touches the endpoint.
+        const reply = await conversationReplyStream(
+          endpoint as ProviderEndpoint,
+          history,
+          userText,
+          (piece) => {
+            void appendEvent(taskId, "AGENT_EVENT", {
+              piEvent: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: piece } },
+            });
+          },
+          this.opts.chat ? { chat: this.opts.chat } : {},
+        );
+        await appendEvent(taskId, "AGENT_EVENT", {
+          piEvent: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: reply }] } },
+        });
+      } catch (err) {
+        await appendEvent(taskId, "AGENT_EVENT", {
+          piEvent: { type: "turn_error", error: err instanceof Error ? err.message : String(err) },
+        });
+      }
+    })();
+    this.conversationReplies.set(taskId, run);
+    void run.finally(() => {
+      if (this.conversationReplies.get(taskId) === run) this.conversationReplies.delete(taskId);
+    });
+    return run;
+  }
+
+  /** Resolves when the background conversation reply for a task settles (tests). */
+  whenConversationReplySettled(taskId: string): Promise<void> | null {
+    return this.conversationReplies.get(taskId) ?? null;
   }
 
   /**
@@ -791,7 +838,10 @@ export class TaskManager {
   /**
    * Continued turn on a "conversation" session. History is replayed from the
    * session event log (single source of truth) and answered by the stateless
-   * server chat channel — still no Pi runtime, no task lifecycle.
+   * server chat channel — still no Pi runtime, no task lifecycle. The user
+   * turn is recorded immediately and the reply streams into the log in the
+   * background, so the HTTP caller returns at once and the desktop renders
+   * the reply as it arrives.
    */
   private async conversationTurn(taskId: string, message: string): Promise<{ ok: boolean; message: string }> {
     const text = message.trim();
@@ -804,16 +854,7 @@ export class TaskManager {
     // Record the user turn (mirrors the engineering message() path); even a
     // failed reply leaves an auditable trace in the session log.
     await appendEvent(taskId, "AGENT_EVENT", { piEvent: { type: "user_message", text } });
-    if (!endpoint) {
-      return { ok: false, message: "no provider configured for conversation replies" };
-    }
-    const reply = await conversationReply(endpoint, history, text);
-    await appendEvent(taskId, "AGENT_EVENT", {
-      piEvent: {
-        type: "message_update",
-        assistantMessageEvent: { type: "text_delta", delta: reply },
-      },
-    });
+    this.streamConversationReply(taskId, endpoint, history, text);
     return { ok: true, message: "ok" };
   }
 }

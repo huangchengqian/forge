@@ -156,6 +156,16 @@ describe("replayConversationHistory", () => {
     assert.deepEqual(replayConversationHistory(events), [{ role: "assistant", content: "hi" }]);
   });
 
+  test("markdown line breaks survive replay (models mirror history formatting)", () => {
+    // Regression: flattening all whitespace in history made later replies come
+    // back as unformatted single-line prose walls.
+    const events = [
+      { type: "AGENT_EVENT", payload: { piEvent: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "## 标题\n\n- 要点一\n- 要点二" } } } },
+    ];
+    const out = replayConversationHistory(events);
+    assert.equal(out[0]!.content, "## 标题\n\n- 要点一\n- 要点二");
+  });
+
   test("message_end authoritative text replaces corrupted CJK deltas", () => {
     // Real-world shape (task 4959y): deltas arrive with character reordering
     // ("to the user. greet") while the final message is clean.

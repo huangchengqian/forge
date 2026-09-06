@@ -1,4 +1,4 @@
-import { callProvider, extractResponseText, type ProviderEndpoint } from "./provider-api.ts";
+import { callProvider, extractResponseText, streamProviderText, type ProviderEndpoint } from "./provider-api.ts";
 import type { ForgeConfig, ProviderConfig } from "./config-store.ts";
 import { resolveProvider } from "./config-store.ts";
 
@@ -63,14 +63,14 @@ Rules:
 - For "conversation", output: {"kind":"conversation","reply":"<your direct reply to the user, in the user's language>"} — reply briefly (2-4 sentences) as a knowledgeable coding assistant. Do not claim you modified files or ran commands; if the user wants engineering work, briefly explain the approach and suggest starting an engineering task. Avoid saying "I have no tools" or "I cannot access files".
 - Output ONLY one JSON object. No prose, no code fences. Keep the reply short so the JSON always closes.`;
 
-function chatOnce(
+function chatBody(
   endpoint: ProviderEndpoint,
   system: string,
   messages: readonly ChatMessage[],
   maxTokens = 3000,
-): Promise<string> {
+): Record<string, unknown> {
   const openai = endpoint.api === "openai-completions" || endpoint.api === "openai-responses";
-  const body: Record<string, unknown> = {
+  return {
     model: endpoint.modelId,
     max_tokens: maxTokens,
     messages: [
@@ -82,7 +82,17 @@ function chatOnce(
       ),
     ],
   };
-  return callProvider(endpoint, body).then((res) => extractResponseText(res, endpoint.api));
+}
+
+function chatOnce(
+  endpoint: ProviderEndpoint,
+  system: string,
+  messages: readonly ChatMessage[],
+  maxTokens = 3000,
+): Promise<string> {
+  return callProvider(endpoint, chatBody(endpoint, system, messages, maxTokens)).then((res) =>
+    extractResponseText(res, endpoint.api),
+  );
 }
 
 /**
@@ -223,10 +233,82 @@ export async function conversationReply(
   userText: string,
   opts: RouterOptions = {},
 ): Promise<string> {
-  const chat = opts.chat ?? chatOnce;
+  return conversationReplyStream(endpoint, history, userText, () => {}, opts);
+}
+
+/**
+ * Streaming variant: invokes onDelta per text piece as it arrives from the
+ * provider (the caller persists each piece so the desktop can render the
+ * reply live) and resolves with the full cleaned reply. An injected
+ * `opts.chat` (tests) bypasses streaming and delivers one piece.
+ */
+export async function conversationReplyStream(
+  endpoint: ProviderEndpoint,
+  history: readonly ChatMessage[],
+  userText: string,
+  onDelta: (piece: string) => void,
+  opts: RouterOptions = {},
+): Promise<string> {
   const messages: ChatMessage[] = [...history, { role: "user", content: userText }];
+  // Reasoning models (MiniMax/DeepSeek) emit a leading <think>…</think> in
+  // the content stream. Filter it incrementally so the live conversation view
+  // never shows raw think text; the final text is stripped below regardless.
+  const THINK_OPEN = "<think>";
+  const THINK_CLOSE = "</think>";
+  let phase: "detect" | "thinking" | "answer" = "detect";
+  let buf = "";
+  const filter = (delta: string): void => {
+    if (phase === "answer") {
+      onDelta(delta);
+      return;
+    }
+    buf += delta;
+    if (phase === "detect") {
+      const trimmed = buf.replace(/^[ \t\r\n]+/, "");
+      if (trimmed.length === 0) return;
+      if (trimmed.startsWith(THINK_OPEN)) {
+        buf = trimmed.slice(THINK_OPEN.length);
+        phase = "thinking";
+      } else if (THINK_OPEN.startsWith(trimmed)) {
+        return; // could still become "<think>" once more bytes arrive
+      } else {
+        phase = "answer";
+        const rest = buf;
+        buf = "";
+        onDelta(rest);
+        return;
+      }
+    }
+    const close = buf.indexOf(THINK_CLOSE);
+    if (close !== -1) {
+      const rest = buf.slice(close + THINK_CLOSE.length);
+      buf = "";
+      phase = "answer";
+      if (rest.length > 0) onDelta(rest);
+      return;
+    }
+    // Hold back a tail that could still be a partial "</think>" prefix.
+    const safe = Math.max(0, buf.length - (THINK_CLOSE.length - 1));
+    if (safe > 0) {
+      onDelta(buf.slice(0, safe));
+      buf = buf.slice(safe);
+    }
+  };
+
   try {
-    const text = await chat(endpoint, CHAT_SYSTEM_PROMPT, messages);
+    let text: string;
+    if (opts.chat) {
+      text = await opts.chat(endpoint, CHAT_SYSTEM_PROMPT, messages);
+      filter(text);
+    } else {
+      text = await streamProviderText(endpoint, chatBody(endpoint, CHAT_SYSTEM_PROMPT, messages), filter, 120_000);
+    }
+    // `filter` (a closure) may have advanced the state machine; TS can't see
+    // closure mutations, so read the phase loosely here.
+    if ((phase as string) === "answer" && buf.length > 0) {
+      onDelta(buf);
+      buf = "";
+    }
     const cleaned = text
       .replace(/<\s*think\s*>[\s\S]*?<\/\s*think\s*>/g, " ")
       .trim();
@@ -254,7 +336,11 @@ export function replayConversationHistory(
   const flushAssistant = () => {
     const cleaned = assistantBuf
       .replace(/<\s*think\s*>[\s\S]*?<\/\s*think\s*>/g, " ")
-      .replace(/\s+/g, " ")
+      // Collapse runs of spaces/tabs but KEEP line breaks: models mirror the
+      // formatting of the conversation they see — flattening history to single
+      // lines made subsequent replies come back as unformatted prose walls.
+      .replace(/[^\S\n]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
     if (cleaned.length > 0) turns.push({ role: "assistant", text: cleaned });
     assistantBuf = "";
