@@ -130,6 +130,14 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
       } else if (pe.type === "turn_error") {
         flushAll();
         items.push({ kind: "status", text: String(pe.error ?? "turn failed"), tone: "bad" });
+      } else if (pe.type === "compaction_start") {
+        // Pi auto-compacts near the context watermark (threshold/overflow) or
+        // on /compact; surface it so the silent pause has a visible cause.
+        flushAll();
+        items.push({ kind: "status", text: `Compacting context (${String(pe.reason ?? "threshold")})…`, tone: "info" });
+      } else if (pe.type === "compaction_end") {
+        flushAll();
+        items.push({ kind: "status", text: "Context compacted", tone: "ok" });
       }
     } else if (e.type === "MEMORY_USED") {
       flushAll();
