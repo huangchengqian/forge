@@ -164,7 +164,7 @@ async function runStep(
   publish(bus, { type: "step_started", taskId: task.id, stepId: step.id, at: Date.now() });
   await appendEvent(task.id, "STEP_STARTED", { stepId: step.id, intent: step.intent, attempt: step.attempts + 1 });
 
-  await runtime.prompt(session, prompt, { deadlineMs: 5 * 60_000 });
+  await runtime.prompt(session, prompt, { deadlineMs: 10 * 60_000 });
 
   const updatedStep: PlanStep = {
     ...step,
@@ -308,6 +308,30 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
   const evaluator = handle.evaluator;
 
   const deadline = Date.now() + (handle.deadlineMs ?? 10 * 60_000);
+
+  // Any escaped error (runtime deadline, subprocess death, persistence IO)
+  // must settle the task gracefully — a rejection here is stored as
+  // handle.runPromise and an unobserved rejection would crash the server.
+  try {
+    return await runOrchestratorLoop(handle, { task, planner, bus, finalPolicy, deadline, evaluator, scheduler });
+  } catch (err) {
+    return await failTask(task, `orchestrator error: ${err instanceof Error ? err.message : String(err)}`, bus);
+  }
+}
+
+async function runOrchestratorLoop(
+  handle: OrchestratorHandle,
+  ctx: { task: TaskSession; planner: Planner; bus: EventBus | undefined; finalPolicy: RetryPolicy; deadline: number; evaluator: Evaluator; scheduler: ExecutionScheduler },
+): Promise<TaskSession> {
+  let { task } = ctx;
+  const { session } = handle;
+  const registry = handle.skillRegistry ?? getGlobalSkillRegistry();
+  const evaluator = ctx.evaluator;
+  const planner = ctx.planner;
+  const bus = ctx.bus;
+  const finalPolicy = ctx.finalPolicy;
+  const scheduler = ctx.scheduler;
+  const deadline = ctx.deadline;
 
   if (task.state === "READY") {
     const from = task.state;
@@ -612,7 +636,7 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
           task = await failTask(task, "FIX lost target step", bus);
           break;
         }
-        await handle.runtime.prompt(handle.session, action.promptHint, { deadlineMs: 5 * 60_000 });
+        await handle.runtime.prompt(handle.session, action.promptHint, { deadlineMs: 10 * 60_000 });
         if (handle.abortSignal?.aborted) return cancelTask(task, bus);
 
         const fixedStep: PlanStep = {

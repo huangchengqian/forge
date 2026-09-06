@@ -456,6 +456,11 @@ export class TaskManager {
         this.opts.supervisor.reportCrash(taskId, err);
         throw err;
       });
+    // Mark the run's rejection as handled at the manager level: whenSettled
+    // consumers still observe it, but an unobserved run (e.g. the HTTP caller
+    // went away) must never surface as an unhandledRejection and kill the
+    // server.
+    void runPromise.catch(() => {});
     this.active.set(taskId, { taskId, session, runtime: handle.runtime, runPromise, workspaceKey, controller });
     this.opts.supervisor.track(taskId);
     return { taskId };
@@ -628,6 +633,11 @@ export class TaskManager {
         this.opts.supervisor.reportCrash(taskId, err);
         throw err;
       });
+    // Mark the run's rejection as handled at the manager level: whenSettled
+    // consumers still observe it, but an unobserved run (e.g. the HTTP caller
+    // went away) must never surface as an unhandledRejection and kill the
+    // server.
+    void runPromise.catch(() => {});
     this.active.set(taskId, { taskId, session, runtime: handle.runtime, runPromise, workspaceKey, controller });
     this.opts.supervisor.track(taskId);
 
