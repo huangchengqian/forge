@@ -357,7 +357,7 @@ body {
   border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent); padding: 14px 32px 20px;
   background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(12px);
 }
-.conversation-composer { max-width: 780px; margin: 0 auto; }
+.conversation-composer { max-width: 780px; margin: 0 auto; position: relative; }
 .status-event { margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--border); font-size: 12px; }
 .changed-files { border-top: 1px solid var(--border); margin: 28px 0 0; padding-top: 18px; }
 

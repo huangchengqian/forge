@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { streamUrl, fetchTaskList, fetchMemory, createTask, sendMessage, deleteSession as deleteSessionApi, renameTask } from "./desktop-client.ts";
+import { streamUrl, fetchTaskList, fetchMemory, createTask, sendMessage, deleteSession as deleteSessionApi, renameTask, type ComposerImage } from "./desktop-client.ts";
 import type { EventEnvelope } from "./desktop-client.ts";
 import type { TaskSession, MemoryItem } from "../shared/types.ts";
 import { isTaskTerminal } from "../shared/state-labels.ts";
@@ -112,8 +112,8 @@ function createStore() {
     async createTask(input: { goal: string; provider?: string; modelId?: string; providerId?: string; maxConcurrency?: number }) {
       return createTaskAction(input);
     },
-    async sendMessage(taskId: string, message: string) {
-      await sendMessage(taskId, message);
+    async sendMessage(taskId: string, message: string, images?: ComposerImage[]) {
+      await sendMessage(taskId, message, images);
     },
     async deleteSession(taskId: string) {
       await deleteSessionApi(taskId);

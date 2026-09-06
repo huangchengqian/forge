@@ -1,3 +1,4 @@
+import type { RuntimeImage } from "../runtime/interface.ts";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { EventBus } from "../events/index.ts";
@@ -216,8 +217,26 @@ async function handleRequest(
   if (req.method === "POST" && parts[0] === "tasks" && parts[2] === "message" && parts.length === 3) {
     const body = await readBody(req);
     const text = typeof body.message === "string" ? body.message : "";
-    const result = await manager.message(parts[1]!, text);
+    let images: RuntimeImage[] | undefined;
+    if (Array.isArray(body.images)) {
+      images = body.images
+        .filter((i: unknown): i is RuntimeImage => {
+          const img = i as { mimeType?: unknown; data?: unknown };
+          return typeof img?.mimeType === "string" && typeof img?.data === "string" && img.data.length <= 8_000_000;
+        })
+        .slice(0, 4);
+    }
+    const result = await manager.message(parts[1]!, text, images);
     json(res, result.ok ? 200 : 409, result);
+    return;
+  }
+
+  if (req.method === "GET" && parts[0] === "tasks" && parts[2] === "files" && parts.length === 3) {
+    try {
+      json(res, 200, await manager.listFiles(parts[1]!));
+    } catch (err) {
+      json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+    }
     return;
   }
 

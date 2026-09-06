@@ -134,14 +134,14 @@ export class PiRpcClient {
     };
   }
 
-  async prompt(message: string, opts: { deadlineMs?: number } = {}): Promise<PromptResult> {
+  async prompt(message: string, opts: { deadlineMs?: number } = {}, images?: Array<{ type: "image"; mimeType: string; data: string }>): Promise<PromptResult> {
     // Queue behind any in-flight prompt on the same session (see promptChain).
-    const task = this.promptChain.then(() => this.doPrompt(message, opts));
+    const task = this.promptChain.then(() => this.doPrompt(message, opts, images));
     this.promptChain = task.catch(() => {});
     return task;
   }
 
-  private async doPrompt(message: string, opts: { deadlineMs?: number }): Promise<PromptResult> {
+  private async doPrompt(message: string, opts: { deadlineMs?: number }, images?: Array<{ type: "image"; mimeType: string; data: string }>): Promise<PromptResult> {
     this.collectedEvents = [];
     const deadline = opts.deadlineMs ?? 120_000;
 
@@ -153,7 +153,7 @@ export class PiRpcClient {
 
     try {
       const response = await Promise.race([
-        this.sendAsync("prompt", { message }),
+        this.sendAsync("prompt", images ? { message, images } : { message }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error(`forge: prompt preflight deadline ${deadline}ms exceeded`)), deadline),
         ),
@@ -187,8 +187,8 @@ export class PiRpcClient {
    * agent consumes it at the next turn boundary without ending the current
    * run — agent_settled keeps waiting until steered turns finish too.
    */
-  async steer(message: string): Promise<void> {
-    const res = await this.sendAsync("steer", { message });
+  async steer(message: string, images?: Array<{ type: "image"; mimeType: string; data: string }>): Promise<void> {
+    const res = await this.sendAsync("steer", images ? { message, images } : { message });
     if (!res.success) throw new Error(res.error ?? "steer failed");
   }
 

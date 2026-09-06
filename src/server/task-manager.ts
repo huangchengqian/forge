@@ -2,7 +2,7 @@ import type { AgentRuntime, RuntimeSession } from "../runtime/interface.ts";
 import { PiRuntime } from "../runtime/pi/index.ts";
 import { FakeRuntime } from "../runtime/fake-runtime.ts";
 import { EventBus } from "../events/index.ts";
-import { access, constants, stat, rm } from "node:fs/promises";
+import { access, constants, stat, rm, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   attachTask,
@@ -33,6 +33,7 @@ import {
   type IntentResult,
 } from "./intent-router.ts";
 import type { ProviderEndpoint } from "./provider-api.ts";
+import type { RuntimeImage } from "../runtime/interface.ts";
 
 /** Typed error so the HTTP layer can map create/resume failures to status codes. */
 export class CreateTaskError extends Error {
@@ -837,7 +838,7 @@ export class TaskManager {
    * "keep talking to the agent" path — no new plan/state machine, the agent
    * just acts, and its messages/tool calls stream out via onPiEvent.
    */
-  async message(taskId: string, message: string): Promise<{ ok: boolean; message: string }> {
+  async message(taskId: string, message: string, images?: RuntimeImage[]): Promise<{ ok: boolean; message: string }> {
     const entry = this.idle.get(taskId) ?? this.active.get(taskId);
     if (!entry) {
       // Phase 9.7: a settled "conversation" session has no Pi runtime — its
@@ -858,7 +859,7 @@ export class TaskManager {
     if (this.active.has(taskId) && entry.runtime.steer) {
       await appendEvent(taskId, "AGENT_EVENT", { piEvent: { type: "user_message", text } });
       try {
-        await entry.runtime.steer(entry.session, text);
+        await entry.runtime.steer(entry.session, text, images);
         return { ok: true, message: "steered" };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -868,7 +869,10 @@ export class TaskManager {
     }
     await appendEvent(taskId, "AGENT_EVENT", { piEvent: { type: "user_message", text } });
     try {
-      const turn = await entry.runtime.prompt(entry.session, text, { deadlineMs: 5 * 60_000 });
+      const turn = await entry.runtime.prompt(entry.session, text, {
+        deadlineMs: 5 * 60_000,
+        ...(images && images.length > 0 ? { images } : {}),
+      });
       if (!turn.success) {
         await appendEvent(taskId, "AGENT_EVENT", { piEvent: { type: "turn_error", error: turn.error } });
         return { ok: false, message: turn.error ?? "turn failed" };
@@ -878,6 +882,46 @@ export class TaskManager {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
     return { ok: true, message: "ok" };
+  }
+
+  /**
+   * List workspace files for @-mentions: relative paths, bounded depth and
+   * count, skipping dependency/build directories. Best-effort — a missing
+   * workspace yields an empty list.
+   */
+  async listFiles(taskId: string): Promise<{ files: string[]; truncated: boolean }> {
+    const task = await loadTask(taskId);
+    const workspace = task?.workspacePath ?? task?.directory;
+    if (!workspace) return { files: [], truncated: false };
+    const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "target", ".forge-verify-home"]);
+    const MAX = 500;
+    const files: string[] = [];
+    let truncated = false;
+    const walk = async (dir: string, rel: string, depth: number): Promise<void> => {
+      if (depth > 4 || files.length >= MAX) {
+        if (files.length >= MAX) truncated = true;
+        return;
+      }
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (files.length >= MAX) { truncated = true; return; }
+        if (e.name.startsWith(".") && e.name !== ".env.example") continue;
+        if (e.isDirectory()) {
+          if (SKIP.has(e.name)) continue;
+          await walk(join(dir, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1);
+        } else if (e.isFile()) {
+          files.push(rel ? `${rel}/${e.name}` : e.name);
+        }
+      }
+    };
+    await walk(resolve(workspace), "", 0);
+    files.sort();
+    return { files, truncated };
   }
 
   /**

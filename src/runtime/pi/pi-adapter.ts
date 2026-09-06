@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
   AgentRuntime,
+  RuntimeImage,
   CreateSessionOptions,
   PromptOptions,
   RuntimeModel,
@@ -17,6 +18,12 @@ type PiRuntimeSession = RuntimeSession & {
   client: PiRpcClient;
   proc: PiProcess;
 };
+
+
+/** Forge images map onto pi's ImageContent shape. */
+function toPiImage(img: RuntimeImage): { type: "image"; mimeType: string; data: string } {
+  return { type: "image", mimeType: img.mimeType, data: img.data };
+}
 
 /** A pending human-approval request surfaced from the guard extension. */
 export type ApprovalRequest = {
@@ -127,7 +134,8 @@ export class PiRuntime implements AgentRuntime {
   ): Promise<TurnResult> {
     const pi = session as PiRuntimeSession;
     const deadline = opts?.deadlineMs ?? undefined;
-    const result = await pi.client.prompt(message, deadline !== undefined ? { deadlineMs: deadline } : undefined);
+    const images = opts?.images?.map(toPiImage);
+    const result = await pi.client.prompt(message, deadline !== undefined ? { deadlineMs: deadline } : undefined, images);
     if (!result.success) {
       return {
         success: false,
@@ -147,9 +155,9 @@ export class PiRuntime implements AgentRuntime {
     await pi.client.setModel(model.provider, model.modelId);
   }
 
-  async steer(session: RuntimeSession, message: string): Promise<void> {
+  async steer(session: RuntimeSession, message: string, images?: RuntimeImage[]): Promise<void> {
     const pi = session as PiRuntimeSession;
-    await pi.client.steer(message);
+    await pi.client.steer(message, images?.map(toPiImage));
   }
 
   async getEffortOptions(session: RuntimeSession): Promise<string[]> {
