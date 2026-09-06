@@ -48,7 +48,7 @@ check "config-store tests"   "cd $ROOT && node --import tsx --test src/server/co
 echo ""
 echo "--- Integration ---"
 check "runtime seam test"     "cd $ROOT && npx tsx src/runtime/seam-test.ts"
-check "benchmark (5 golden)"  "cd $ROOT && npm run bench"
+check "benchmark (10 golden)"  "cd $ROOT && npm run bench"
 
 echo ""
 for d in crash verify dynplan skill dag evaluate serve; do

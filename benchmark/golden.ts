@@ -250,6 +250,143 @@ export const GOLDEN_TASKS: readonly GoldenTask[] = [
       }
     },
   },
+  {
+    id: "G-verify-command",
+    category: "new-feature",
+    title: "Create src/notes.md verified through a read-only command",
+    goal: "Create src/notes.md with three bullet lines about HTTP status codes",
+    buildPlanner: () =>
+      new StaticPlanner([
+        {
+          id: "step-1",
+          intent: "create src/notes.md with three bullet lines about HTTP status codes",
+          status: "pending",
+          attempts: 0,
+          dependencies: [],
+          executionGroup: undefined,
+          // Exercises the read-only command allowance added to the
+          // verification policy: `cat` runs as the verification command.
+          successCriteria: [
+            { kind: "file_contains", path: "src/notes.md", pattern: "- 404" },
+            { kind: "command_exit_zero", command: "cat src/notes.md" },
+          ],
+        },
+      ]),
+    perform: async (_stepId, workspace) => {
+      await writeWorkspaceFile(
+        workspace,
+        join("src", "notes.md"),
+        "# HTTP status codes\n\n- 200 OK\n- 301 Moved Permanently\n- 404 Not Found\n- 500 Server Error\n",
+      );
+    },
+  },
+  {
+    id: "H-dependent-steps",
+    category: "new-feature",
+    title: "Create greet module then an entry importing it",
+    goal: "Create src/greet.ts exporting greet(), then create src/entry.ts importing it",
+    buildPlanner: () =>
+      new StaticPlanner([
+        {
+          id: "step-greet",
+          intent: "create src/greet.ts exporting greet(name)",
+          status: "pending",
+          attempts: 0,
+          dependencies: [],
+          executionGroup: undefined,
+          successCriteria: [
+            { kind: "file_contains", path: "src/greet.ts", pattern: "export function greet" },
+          ],
+        },
+        {
+          id: "step-entry",
+          intent: "create src/entry.ts importing greet from src/greet.ts",
+          status: "pending",
+          attempts: 0,
+          dependencies: ["step-greet"],
+          executionGroup: undefined,
+          successCriteria: [
+            { kind: "file_contains", path: "src/entry.ts", pattern: "greet" },
+          ],
+        },
+      ]),
+    perform: async (stepId, workspace) => {
+      if (stepId === "step-greet") {
+        await writeWorkspaceFile(
+          workspace,
+          join("src", "greet.ts"),
+          'export function greet(name: string): string {\n  return `hello ${name}`;\n}\n',
+        );
+      }
+      if (stepId === "step-entry") {
+        await writeWorkspaceFile(
+          workspace,
+          join("src", "entry.ts"),
+          'import { greet } from "./greet";\n\nconsole.log(greet("forge"));\n',
+        );
+      }
+    },
+  },
+  {
+    id: "I-remove-stale-after-investigation",
+    category: "refactor",
+    title: "Remove the deprecated flag from config.json (investigates first)",
+    goal: "Remove the deprecated \"legacyMode\" flag from config.json",
+    buildPlanner: () =>
+      new StaticPlanner([
+        {
+          id: "step-1",
+          intent: "remove the legacyMode key from config.json",
+          status: "pending",
+          attempts: 0,
+          dependencies: [],
+          executionGroup: undefined,
+          successCriteria: [
+            { kind: "file_contains", path: "config.json", pattern: '"mode": "fast"' },
+            { kind: "file_not_contains", path: "config.json", pattern: "legacyMode" },
+          ],
+        },
+      ]),
+    perform: async (_stepId, workspace, attempt) => {
+      const raw = await readFile(join(workspace, "config.json"), "utf8");
+      if (attempt < 1) {
+        // First round: legitimately inspects, changes nothing.
+        return;
+      }
+      const updated = raw
+        .replace(/,\s*"legacyMode":\s*true/, "")
+        .replace(/"legacyMode":\s*true,\s*/, "");
+      await writeFile(join(workspace, "config.json"), updated, "utf8");
+    },
+  },
+  {
+    id: "J-directory-artifact",
+    category: "new-feature",
+    title: "Create assets directory with a manifest file",
+    goal: "Create the assets directory containing manifest.json listing icon.svg",
+    buildPlanner: () =>
+      new StaticPlanner([
+        {
+          id: "step-1",
+          intent: "create assets/manifest.json referencing icon.svg",
+          status: "pending",
+          attempts: 0,
+          dependencies: [],
+          executionGroup: undefined,
+          successCriteria: [
+            { kind: "directory_exists", path: "assets" },
+            { kind: "file_contains", path: "assets/manifest.json", pattern: "icon.svg" },
+          ],
+        },
+      ]),
+    perform: async (_stepId, workspace) => {
+      await writeWorkspaceFile(
+        workspace,
+        join("assets", "manifest.json"),
+        '{\n  "icons": ["icon.svg"]\n}\n',
+      );
+    },
+  },
 ];
 
 export async function seedFixture(workspace: string, extra?: readonly FixtureFile[]): Promise<void> {

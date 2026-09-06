@@ -19,6 +19,10 @@ export const SAMPLE_PROJECT: readonly FixtureFile[] = [
       'export function add(a: number, b: number): number {\n  return a - b;\n}\n',
   },
   {
+    path: "config.json",
+    content: '{\n  "mode": "fast",\n  "legacyMode": true\n}\n',
+  },
+  {
     path: "README.md",
     content: '# sample-project\n\nFixture repository for Forge benchmarks.\n',
   },
