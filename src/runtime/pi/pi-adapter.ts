@@ -151,6 +151,35 @@ export class PiRuntime implements AgentRuntime {
     await pi.client.steer(message);
   }
 
+  async getEffortOptions(session: RuntimeSession): Promise<string[]> {
+    const pi = session as PiRuntimeSession;
+    return await pi.client.getAvailableThinkingLevels();
+  }
+
+  async setEffort(session: RuntimeSession, level: string): Promise<void> {
+    const pi = session as PiRuntimeSession;
+    await pi.client.setThinkingLevel(level);
+  }
+
+  async getRuntimeState(session: RuntimeSession): Promise<{ effort?: string; contextWindow?: number }> {
+    const pi = session as PiRuntimeSession;
+    const state = await pi.client.getState();
+    if (!state.success || !state.data || typeof state.data !== "object") return {};
+    const s = state.data as {
+      thinkingLevel?: string;
+      model?: { contextWindow?: number };
+    };
+    return {
+      effort: typeof s.thinkingLevel === "string" ? s.thinkingLevel : undefined,
+      contextWindow: typeof s.model?.contextWindow === "number" ? s.model.contextWindow : undefined,
+    };
+  }
+
+  async compact(session: RuntimeSession, instructions?: string): Promise<void> {
+    const pi = session as PiRuntimeSession;
+    await pi.client.compact(instructions);
+  }
+
   async abort(session: RuntimeSession): Promise<void> {
     const pi = session as PiRuntimeSession;
     await pi.client.abort();

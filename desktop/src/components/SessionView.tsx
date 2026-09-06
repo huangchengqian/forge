@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TaskSession, MemoryItem, Plan } from "../shared/types.ts";
-import type { EventEnvelope, DiffResult, ProviderConfig } from "../lib/desktop-client.ts";
-import { fetchDiff, undoTask, cancelTask } from "../lib/desktop-client.ts";
+import type { EventEnvelope, DiffResult, ProviderConfig, EffortState } from "../lib/desktop-client.ts";
+import { fetchDiff, undoTask, cancelTask, getEffort, setEffort, compactTask } from "../lib/desktop-client.ts";
 import { isTaskTerminal, ApprovalCard } from "./ApprovalCenter.tsx";
 import type { ApprovalRecord } from "../lib/desktop-client.ts";
 import { Markdown } from "./Markdown.tsx";
@@ -256,6 +256,8 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
   const [planOpen, setPlanOpen] = useState(true);
   const [switching, setSwitching] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [effort, setEffortState] = useState<EffortState | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const streamEndRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -277,8 +279,10 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
   useEffect(() => {
     let alive = true;
     stickToBottomRef.current = true;
-    setDiff(null); setUndoMsg(null);
+    setDiff(null); setUndoMsg(null); setEffortState(null); setNotice(null);
     void fetchDiff(task.id).then((d) => { if (alive) setDiff(d); }).catch(() => {});
+    // Effort + context facts only exist for sessions with a live/idle runtime.
+    void getEffort(task.id).then((e) => { if (alive && e.levels.length > 0) setEffortState(e); }).catch(() => {});
     return () => { alive = false; };
   }, [task.id]);
 
@@ -298,10 +302,37 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
   async function handleSend() {
     const m = draft.trim();
     if (!m || sending || !onSend) return;
+    // Slash command: /compact [instructions] — manual context compaction.
+    const compactMatch = /^\/compact(?:\s+([\s\S]+))?$/.exec(m);
+    if (compactMatch) {
+      setSending(true); setSendError(null);
+      try {
+        await compactTask(task.id, compactMatch[1]?.trim() || undefined);
+        setDraft("");
+        setNotice("Context compacted");
+        setTimeout(() => setNotice(null), 4000);
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : String(err));
+      }
+      setSending(false);
+      return;
+    }
     setSending(true); setSendError(null);
     try { await onSend(m); setDraft(""); }
     catch (err) { setSendError(err instanceof Error ? err.message : String(err)); }
     setSending(false);
+  }
+
+  async function handleEffortChange(level: string) {
+    if (switching) return;
+    setSwitching(true); setSendError(null);
+    try {
+      await setEffort(task.id, level);
+      setEffortState(await getEffort(task.id));
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : String(err));
+    }
+    setSwitching(false);
   }
 
   async function handleStop() {
@@ -359,8 +390,12 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
           {stateLabel(task.state)}
         </span>
         {usage.lastInput + usage.totalOutput > 0 && (
-          <span className="chip" title={`Context ≈ ${usage.lastInput.toLocaleString()} tokens (latest turn input) · ${usage.totalOutput.toLocaleString()} output tokens total`}>
-            ctx {fmtTokens(usage.lastInput)} · out {fmtTokens(usage.totalOutput)}
+          <span
+            className="chip"
+            style={effort?.contextWindow && usage.lastInput / effort.contextWindow > 0.8 ? { color: "var(--yellow)", borderColor: "var(--yellow)" } : undefined}
+            title={`Context ≈ ${usage.lastInput.toLocaleString()}${effort?.contextWindow ? ` / ${effort.contextWindow.toLocaleString()} tokens (${Math.round((usage.lastInput / effort.contextWindow) * 100)}%)` : " tokens (latest turn input)"} · ${usage.totalOutput.toLocaleString()} output tokens total`}>
+            ctx {effort?.contextWindow ? `${Math.round((usage.lastInput / effort.contextWindow) * 100)}%` : fmtTokens(usage.lastInput)}
+            {" · out "}{fmtTokens(usage.totalOutput)}
             {usage.cost > 0.0005 && ` · $${usage.cost.toFixed(2)}`}
           </span>
         )}
@@ -514,6 +549,19 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
                 className="composer-ta"
               />
               <div className="composer-actions">
+                {effort && effort.levels.length > 1 && (
+                  <select
+                    value={effort.current ?? ""}
+                    onChange={(e) => void handleEffortChange(e.target.value)}
+                    disabled={switching}
+                    title="Reasoning effort for subsequent turns"
+                    className="composer-model-select">
+                    {!effort.current && <option value="">effort</option>}
+                    {effort.levels.map((l) => (
+                      <option key={l} value={l}>effort: {l}</option>
+                    ))}
+                  </select>
+                )}
                 {providers.length > 0 && (
                   <select
                     value={task.model.provider ?? ""}
@@ -536,7 +584,11 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
                 </button>
               </div>
             </div>
-            {sendError && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}>{sendError}</div>}
+            {(sendError || notice) && (
+              <div style={{ color: sendError ? "var(--red)" : "var(--green)", fontSize: 12, marginTop: 6 }}>
+                {sendError ?? notice}
+              </div>
+            )}
           </div>
         </div>
       )}

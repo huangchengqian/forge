@@ -43,6 +43,20 @@ export interface AgentRuntime {
    * defined. Runtimes without steering support omit this method.
    */
   steer?(session: RuntimeSession, message: string): Promise<void>;
+  /** Reasoning-effort levels the session's model supports. */
+  getEffortOptions?(session: RuntimeSession): Promise<string[]>;
+  /** Set the reasoning effort for subsequent turns. Levels are model-specific. */
+  setEffort?(session: RuntimeSession, level: string): Promise<void>;
+  /**
+   * Live runtime facts for the session: current effort and the model's
+   * context window size (tokens). Backs the desktop context gauge.
+   */
+  getRuntimeState?(session: RuntimeSession): Promise<{ effort?: string; contextWindow?: number }>;
+  /**
+   * Manually compact the session context. Runtimes without compaction omit
+   * this method.
+   */
+  compact?(session: RuntimeSession, instructions?: string): Promise<void>;
   /**
    * Switch the session to a different model mid-flight (steering). The
    * runtime must preserve conversation history and workspace state. Runtimes
