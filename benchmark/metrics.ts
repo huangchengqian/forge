@@ -9,7 +9,7 @@ export function computeTaskMetrics(args: {
   events: readonly PersistedEvent[];
   runtimeStats: RuntimeStats;
   wallMs: number;
-  expectedState?: string;
+  expectedState?: string | undefined;
 }): TaskMetrics {
   const { final, events, runtimeStats, wallMs } = args;
 

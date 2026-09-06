@@ -37,7 +37,7 @@ export type TaskMetrics = {
   runtimeFailures: number;
   evaluationScore: number | null;
   evaluationStatus: string | null;
-  expectedState: string;
+  expectedState: string | undefined;
 };
 
 export type BenchmarkSummary = {
