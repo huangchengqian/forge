@@ -22,6 +22,7 @@ for (const k of [
 ]) delete process.env[k];
 
 const { TaskManager, CreateTaskError } = await import("./task-manager.ts");
+const { FakeRuntime } = await import("../runtime/fake-runtime.ts");
 const { ProjectsRegistry } = await import("./projects.ts");
 const { EventBus } = await import("../events/index.ts");
 const { RuntimeSupervisor } = await import("./runtime-supervisor.ts");
@@ -29,6 +30,7 @@ const { ApprovalHub } = await import("./approval-hub.ts");
 const { saveTask } = await import("../core/persistence/task-store.ts");
 const { randomUUID } = await import("node:crypto");
 import type { TaskSession } from "../core/types/task-session.ts";
+import type { RuntimeSession, TurnResult } from "../runtime/interface.ts";
 
 type Manager = InstanceType<typeof TaskManager>;
 type ManagerOptions = ConstructorParameters<typeof TaskManager>[0];
@@ -429,5 +431,89 @@ describe("TaskManager Phase 9.7 routing", () => {
     );
     assert.ok(turnError);
     assert.match(String((turnError!.payload?.piEvent as { error?: string }).error), /provider configured/);
+  });
+});
+
+describe("TaskManager mid-run steering", () => {
+  /** Runtime whose prompt blocks until released — simulates a long-running task. */
+  class HangingRuntime extends FakeRuntime {
+    private releases: Array<() => void> = [];
+    private released = false;
+    override async prompt(_session: RuntimeSession, message: string): Promise<TurnResult> {
+      this.promptCalls.push(message);
+      if (!this.released) {
+        await new Promise<void>((resolveP) => this.releases.push(resolveP));
+      }
+      return { success: true, text: "ok", error: undefined };
+    }
+    releaseAll(): void {
+      this.released = true;
+      for (const r of this.releases.splice(0)) r();
+    }
+  }
+
+  function makeHangingManager(rt: HangingRuntime): Manager {
+    return new TaskManager({
+      bus: new EventBus(),
+      forgeHome: TMP,
+      runtimeKind: "fake",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-opus-4-8",
+      maxConcurrency: undefined,
+      supervisor: new RuntimeSupervisor(() => {}),
+      projects,
+      approvalHub: new ApprovalHub(),
+      intentRouter: { classify: async () => ({ kind: "task" }) },
+      runtime: rt,
+    });
+  }
+
+  test("message on an ACTIVE task routes to runtime.steer and returns at once", async () => {
+    const rt = new HangingRuntime(TMP, { steps: [] } as never);
+    const m = makeHangingManager(rt);
+    const { taskId } = await m.create({ goal: "long task", projectId: projectA.id });
+    // Wait until the run is active (first prompt in flight).
+    for (let i = 0; i < 50 && !m.isActive(taskId); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(m.isActive(taskId));
+
+    const t0 = Date.now();
+    const r = await m.message(taskId, "换成用中文写");
+    assert.ok(Date.now() - t0 < 2000, "steer path must not block on the in-flight turn");
+    assert.equal(r.ok, true);
+
+    assert.deepEqual(rt.steeredCalls, ["换成用中文写"]);
+    const { readEvents } = await import("../core/persistence/event-log.ts");
+    const events = await readEvents(taskId);
+    const hasUser = events.some(
+      (e) => e.type === "AGENT_EVENT" &&
+        (e.payload?.piEvent as { type?: string })?.type === "user_message",
+    );
+    assert.ok(hasUser);
+
+    rt.releaseAll();
+    await m.whenSettled(taskId);
+  });
+
+  test("message on a session whose runtime lacks steer falls back to prompt", async () => {
+    const rt = new HangingRuntime(TMP, { steps: [] } as never);
+    // Shadow the prototype steer with undefined — simulates a runtime
+    // built without steering support.
+    (rt as unknown as { steer?: unknown }).steer = undefined;
+    const m = makeHangingManager(rt);
+    const { taskId } = await m.create({ goal: "long task", projectId: projectA.id });
+    for (let i = 0; i < 50 && !m.isActive(taskId); i++) await new Promise((r) => setTimeout(r, 10));
+
+    const r = m.message(taskId, "排队消息");
+    // The fallback queues the message behind the in-flight prompt (blocking
+    // until release) — the point is that it reached runtime.prompt, not steer.
+    await new Promise((res) => setTimeout(res, 100));
+    assert.deepEqual(rt.steeredCalls, []);
+    assert.ok(rt.promptCalls.includes("排队消息"));
+
+    rt.releaseAll();
+    const settled = await m.whenSettled(taskId);
+    assert.ok(settled);
+    const done = await r;
+    assert.equal(done.ok, true);
   });
 });

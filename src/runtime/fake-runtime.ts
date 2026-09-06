@@ -21,6 +21,7 @@ export type FakePlan = {
 
 export class FakeRuntime implements AgentRuntime {
   promptCalls: string[] = [];
+  steeredCalls: string[] = [];
   abortCalls = 0;
   destroyCalls = 0;
 
@@ -57,6 +58,11 @@ export class FakeRuntime implements AgentRuntime {
       };
     }
     return { success: true, text: "ok", error: undefined };
+  }
+
+  /** Records the steer; tests assert against `steeredCalls`. */
+  async steer(_session: RuntimeSession, message: string): Promise<void> {
+    this.steeredCalls.push(message);
   }
 
   async abort(_session: RuntimeSession): Promise<void> {
