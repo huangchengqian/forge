@@ -16,6 +16,7 @@ type ChatItem =
   | { kind: "think"; text: string }
   | { kind: "tool"; name: string; detail: string; status: "running" | "done" | "error" | "pending"; summary: string; diff?: ToolDiffInfo }
   | { kind: "status"; text: string; tone: "info" | "ok" | "bad" }
+  | { kind: "approval"; requestId: string; title: string }
   | { kind: "memory"; memories: UsedMemoryEntry[] };
 
 type ToolDiffInfo = { path: string; edits: Array<{ oldText: string; newText: string }> };
@@ -128,6 +129,15 @@ function toChat(events: readonly EventEnvelope[]): ChatItem[] {
         // session's opening goal — user input is always a bubble.
         flushAll();
         items.push({ kind: "user", text: String(pe.text ?? "") });
+      } else if (pe.type === "extension_ui_request") {
+        // Guard approval request — rendered inline at the exact position in
+        // the conversation (card only while still pending).
+        flushAll();
+        items.push({
+          kind: "approval",
+          requestId: String(pe.id ?? ""),
+          title: String(pe.title ?? "Approval required"),
+        });
       } else if (pe.type === "turn_error") {
         flushAll();
         items.push({ kind: "status", text: String(pe.error ?? "turn failed"), tone: "bad" });
@@ -566,6 +576,17 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
                 </div>
               );
             }
+            if (it.kind === "approval") {
+              // Resolved (or stale) requests render nothing — the tool result
+              // that followed tells the story.
+              const pending = approvals?.find((a) => a.requestId === it.requestId);
+              if (!pending) return null;
+              return (
+                <div key={i} style={{ margin: "10px 0 10px 28px" }}>
+                  <ApprovalCard approval={pending} onDecide={(id, d, always) => onDecide?.(id, d, always)} />
+                </div>
+              );
+            }
             return (
               <div key={i} className="status-event">
                 <span style={{ color: toneColor(it.tone) }}>{it.text}</span>
@@ -607,14 +628,6 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
       {onSend && (
         <div className="conversation-composer-wrap">
           <div className="conversation-composer">
-            {/* Pending guard approvals — inline where the decision is needed. */}
-            {approvals && approvals.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 10 }}>
-                {approvals.map((a) => (
-                  <ApprovalCard key={a.requestId} approval={a} onDecide={(id, d, always) => onDecide?.(id, d, always)} />
-                ))}
-              </div>
-            )}
             <div className="composer-box">
               <textarea
                 ref={taRef}
