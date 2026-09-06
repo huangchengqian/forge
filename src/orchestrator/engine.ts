@@ -23,7 +23,7 @@ import type { SkillRegistry } from "../skills/index.ts";
 import type { EventBus } from "../events/index.ts";
 import { publish } from "../events/index.ts";
 import { DEFAULT_RETRY_POLICY, checkFixBudget, type RetryPolicy } from "./retry-policy.ts";
-import { decideFix } from "./fix-decision.ts";
+import { decideFix, failureSignature } from "./fix-decision.ts";
 
 const FORGE_HOME = process.env.FORGE_HOME ?? `${process.env.HOME ?? "/tmp"}/.forge`;
 
@@ -473,6 +473,24 @@ export async function runOrchestrator(handle: OrchestratorHandle): Promise<TaskS
             emitStateChange(bus, task, from, task.state);
           }
         } else {
+          // Stuck-loop guard: when the two most recent observations of the
+          // failing step failed for the IDENTICAL reason, a FIX round cannot
+          // learn anything new — fail now with a precise reason instead of
+          // burning the remaining FIX budget on identical retries.
+          const stepFailures = task.observations.filter((o) => o.result === "FAIL" && justRun.some((s) => s.id === o.stepId));
+          const lastTwo = stepFailures.slice(-2);
+          if (
+            lastTwo.length === 2 &&
+            failureSignature(lastTwo[0]!) === failureSignature(lastTwo[1]!) &&
+            task.fixCount > 0
+          ) {
+            task = await failTask(
+              task,
+              `${lastTwo[1]!.stepId} stuck: identical verification failure repeated after ${task.fixCount} fix(es): ${lastTwo[1]!.failureReason ?? failureSignature(lastTwo[1]!)}`,
+              bus,
+            );
+            break;
+          }
           const fixBudget = checkFixBudget(task.fixCount, finalPolicy);
           if (fixBudget.kind !== "ok") {
             task = await failTask(

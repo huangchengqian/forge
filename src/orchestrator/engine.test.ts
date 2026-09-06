@@ -37,3 +37,32 @@ test("execution budget and retry policy survive startTask into the runtime handl
   assert.equal(final.fixCount, 0);
   assert.match(final.failureReason ?? "", /task_fix_budget_exhausted/);
 });
+
+test("identical consecutive verification failures short-circuit the FIX loop", async () => {
+  await rm(TMP, { recursive: true, force: true });
+  // The criterion can never pass: the runtime writes nothing, so every
+  // observation fails with the SAME reason. After one fix round the stuck
+  // guard must fail the task instead of retrying the loop until the budget
+  // (10 fixes by default) is exhausted.
+  const runtime = new FakeRuntime(TMP, {
+    steps: [{ intent: "impossible step", criteria: [{ kind: "file_exists", path: "never-created.txt" }] }],
+  });
+  const handle = await startTask({
+    runtime,
+    taskId: "stuck-loop",
+    provider: "fake",
+    modelId: "fake",
+    env: {},
+    eventBus: undefined,
+    deadlineMs: 45_000,
+    policy: { maxFixesPerTask: 10, maxAttemptsPerStep: 3 },
+    workspace: join(TMP, "workspace"),
+  });
+  handle.task.goal = "stuck loop guard";
+
+  const final = await runOrchestrator(handle);
+  assert.equal(final.state, "FAILED");
+  assert.equal(final.fixCount, 1, "must stop after a single fix round, not burn the budget");
+  assert.match(final.failureReason ?? "", /stuck: identical verification failure repeated/);
+  assert.match(final.failureReason ?? "", /file_exists/);
+});
