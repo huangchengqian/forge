@@ -78,13 +78,25 @@ export async function undoTask(taskId: string): Promise<{ restored: number; file
   return r.json() as Promise<{ restored: number; files: string[] }>;
 }
 
-export async function sendMessage(taskId: string, message: string): Promise<void> {
+export async function sendMessage(taskId: string, message: string, images?: ComposerImage[]): Promise<void> {
   const r = await fetch(`${cfg!.baseUrl}/tasks/${taskId}/message`, {
     method: "POST",
     headers: { ...headers(), "content-type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(images && images.length > 0 ? { message, images } : { message }),
   });
   if (!r.ok) throw new Error(`POST message → ${r.status}`);
+}
+
+export type ComposerImage = { mimeType: string; data: string };
+
+/** Relative workspace paths for @-mentions (bounded list). */
+export async function getWorkspaceFiles(taskId: string): Promise<string[]> {
+  try {
+    const j = await getJson<{ files: string[] }>(`/tasks/${taskId}/files`);
+    return j.files ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export async function deleteSession(taskId: string): Promise<void> {

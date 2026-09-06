@@ -5,6 +5,7 @@ import type {
   AgentRuntime,
   CreateSessionOptions,
   PromptOptions,
+  RuntimeImage,
   RuntimeSession,
   TurnResult,
   RuntimeState,
@@ -62,7 +63,7 @@ export class FakeRuntime implements AgentRuntime {
   }
 
   /** Records the steer; tests assert against `steeredCalls`. */
-  async steer(_session: RuntimeSession, message: string): Promise<void> {
+  async steer(_session: RuntimeSession, message: string, _images?: RuntimeImage[]): Promise<void> {
     this.steeredCalls.push(message);
   }
 

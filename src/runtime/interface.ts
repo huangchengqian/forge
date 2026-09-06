@@ -11,6 +11,14 @@ export type RuntimeSession = {
 
 export type PromptOptions = {
   deadlineMs?: number;
+  /** Image attachments for this turn (base64 payloads). */
+  images?: RuntimeImage[];
+};
+
+/** An image attachment sent to the model. `data` is base64, no data: prefix. */
+export type RuntimeImage = {
+  mimeType: string;
+  data: string;
 };
 
 export type TurnResult = {
@@ -48,7 +56,7 @@ export interface AgentRuntime {
    * while the session is known-active; delivering to an idle session is not
    * defined. Runtimes without steering support omit this method.
    */
-  steer?(session: RuntimeSession, message: string): Promise<void>;
+  steer?(session: RuntimeSession, message: string, images?: RuntimeImage[]): Promise<void>;
   /** Reasoning-effort levels the session's model supports. */
   getEffortOptions?(session: RuntimeSession): Promise<string[]>;
   /** Set the reasoning effort for subsequent turns. Levels are model-specific. */

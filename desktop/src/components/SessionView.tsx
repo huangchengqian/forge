@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TaskSession, MemoryItem, Plan } from "../shared/types.ts";
 import type { EventEnvelope, DiffResult, ProviderConfig, EffortState } from "../lib/desktop-client.ts";
-import { fetchDiff, undoTask, cancelTask, getEffort, setEffort, compactTask } from "../lib/desktop-client.ts";
+import { fetchDiff, undoTask, cancelTask, getEffort, setEffort, compactTask, getWorkspaceFiles } from "../lib/desktop-client.ts";
+import type { ComposerImage } from "../lib/desktop-client.ts";
 import { isTaskTerminal, ApprovalCard } from "./ApprovalCenter.tsx";
 import type { ApprovalRecord } from "../lib/desktop-client.ts";
 import { Markdown } from "./Markdown.tsx";
@@ -251,7 +252,7 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
   providers: readonly ProviderConfig[];
   approvals?: readonly ApprovalRecord[];
   onDecide?: (requestId: string, decision: "approve" | "deny", always?: boolean) => void;
-  onSend?: (message: string) => Promise<void>;
+  onSend?: (message: string, images?: ComposerImage[]) => Promise<void>;
   onSwitchModel?: (providerId: string) => Promise<void>;
 }) {
   const [diff, setDiff] = useState<DiffResult | null>(null);
@@ -266,6 +267,9 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
   const [stopping, setStopping] = useState(false);
   const [effort, setEffortState] = useState<EffortState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [images, setImages] = useState<ComposerImage[]>([]);
+  const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   const streamEndRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -307,17 +311,43 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
     setUndoing(false);
   }
 
+  // Slash commands run client-side against task APIs; anything else goes to
+  // the model (with image attachments when present).
+  const SLASH_COMMANDS: ReadonlyArray<{ name: string; description: string; run: (taskId: string, arg?: string) => Promise<string> }> = [
+    {
+      name: "compact",
+      description: "Compact the session context (/compact [instructions])",
+      run: async (taskId, arg) => {
+        await compactTask(taskId, arg);
+        return "Context compacted";
+      },
+    },
+    {
+      name: "undo",
+      description: "Undo the file changes this task made",
+      run: async (taskId) => {
+        const r = await undoTask(taskId);
+        return `Undone — ${r.restored} file(s) restored`;
+      },
+    },
+  ];
+
   async function handleSend() {
     const m = draft.trim();
     if (!m || sending || !onSend) return;
-    // Slash command: /compact [instructions] — manual context compaction.
-    const compactMatch = /^\/compact(?:\s+([\s\S]+))?$/.exec(m);
-    if (compactMatch) {
+    if (m.startsWith("/")) {
+      const name = m.slice(1).split(/\s+/)[0] ?? "";
+      const cmd = SLASH_COMMANDS.find((c) => c.name === name);
       setSending(true); setSendError(null);
+      if (!cmd) {
+        setSendError(`Unknown command: /${name}. Available: ${SLASH_COMMANDS.map((c) => "/" + c.name).join(", ")}`);
+        setSending(false);
+        return;
+      }
+      const arg = m.slice(1 + name.length).trim() || undefined;
       try {
-        await compactTask(task.id, compactMatch[1]?.trim() || undefined);
+        setNotice(await cmd.run(task.id, arg));
         setDraft("");
-        setNotice("Context compacted");
         setTimeout(() => setNotice(null), 4000);
       } catch (err) {
         setSendError(err instanceof Error ? err.message : String(err));
@@ -326,9 +356,49 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
       return;
     }
     setSending(true); setSendError(null);
-    try { await onSend(m); setDraft(""); }
+    try { await onSend(m, images.length > 0 ? images : undefined); setDraft(""); setImages([]); }
     catch (err) { setSendError(err instanceof Error ? err.message : String(err)); }
     setSending(false);
+  }
+
+  /** Image attachments pasted into the composer. */
+  async function handlePaste(e: React.ClipboardEvent) {
+    const files = [...e.clipboardData.items].filter((i) => i.type.startsWith("image/"));
+    if (files.length === 0 || images.length >= 4) return;
+    e.preventDefault();
+    for (const item of files.slice(0, 4 - images.length)) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      const data = await new Promise<string>((resolveP, rejectP) => {
+        const reader = new FileReader();
+        reader.onload = () => resolveP(String(reader.result).split(",")[1] ?? "");
+        reader.onerror = () => rejectP(reader.error);
+        reader.readAsDataURL(file);
+      });
+      setImages((prev) => (prev.length < 4 ? [...prev, { mimeType: file.type, data }] : prev));
+    }
+  }
+
+  /** Track a trailing @token in the draft for the mention dropdown. */
+  function trackMention(value: string, caret: number) {
+    const upto = value.slice(0, caret);
+    const m = /(?:^|\s)@([\w./-]*)$/.exec(upto);
+    if (m) {
+      const query = m[1] ?? "";
+      if (!mention) void getWorkspaceFiles(task.id).then((f) => setWorkspaceFiles(f));
+      setMention({ query, start: caret - query.length });
+    } else {
+      setMention(null);
+    }
+  }
+
+  function insertMention(file: string) {
+    if (!mention) return;
+    const caret = taRef.current?.selectionStart ?? draft.length;
+    const next = `${draft.slice(0, mention.start)}${file} ${draft.slice(caret)}`;
+    setDraft(next);
+    setMention(null);
+    taRef.current?.focus();
   }
 
   async function handleEffortChange(level: string) {
@@ -386,6 +456,10 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
   }
 
   const active = !isTaskTerminal(task.state);
+  const mentionMatches =
+    mention && typeof mention.query === "string"
+      ? workspaceFiles.filter((f) => f.toLowerCase().includes(mention.query.toLowerCase()) && !draft.includes(f)).slice(0, 8)
+      : [];
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -545,7 +619,7 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
               <textarea
                 ref={taRef}
                 value={draft}
-                onChange={(e) => { setDraft(e.target.value); autoGrow(); }}
+                onChange={(e) => { setDraft(e.target.value); autoGrow(); trackMention(e.target.value, e.target.selectionStart ?? 0); }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -553,6 +627,7 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
                   }
                 }}
                 placeholder="Reply / continue…  (Enter to send, Shift+Enter for newline)"
+                onPaste={handlePaste}
                 rows={1}
                 className="composer-ta"
               />
@@ -592,7 +667,37 @@ export function SessionView({ task, memory, liveEvents, providers, approvals, on
                 </button>
               </div>
             </div>
-            {(sendError || notice) && (
+            {mention && mentionMatches.length > 0 && (
+              <div style={{ position: "absolute", bottom: "100%", left: 0, right: 0, marginBottom: 6, background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: 4, boxShadow: "0 8px 28px rgba(0,0,0,0.4)", zIndex: 500, maxHeight: 220, overflowY: "auto" }}>
+                {mentionMatches.map((f) => (
+                  <div key={f} onClick={() => insertMention(f)} style={{ padding: "6px 10px", borderRadius: 5, cursor: "pointer", fontSize: 12.5, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                    {f}
+                  </div>
+                ))}
+              </div>
+            )}
+            {images.length > 0 && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                {images.map((img, i) => (
+                  <div key={i} style={{ position: "relative" }}>
+                    <img
+                      src={`data:${img.mimeType};base64,${img.data}`}
+                      alt={`attachment ${i + 1}`}
+                      style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }}
+                    />
+                    <button
+                      onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                      title="Remove attachment"
+                      style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: 99, border: "1px solid var(--border-strong)", background: "var(--bg-secondary)", color: "var(--text-secondary)", fontSize: 10, cursor: "pointer", lineHeight: 1 }}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+{(sendError || notice) && (
               <div style={{ color: sendError ? "var(--red)" : "var(--green)", fontSize: 12, marginTop: 6 }}>
                 {sendError ?? notice}
               </div>

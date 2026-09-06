@@ -204,7 +204,7 @@ export function App() {
             providers={configData?.providers ?? []}
             approvals={approvalTaskId === selectedTask.id ? approvals : undefined}
             onDecide={decide}
-            onSend={async (msg) => { await store.sendMessage(selectedTask.id, msg); }}
+            onSend={async (msg, images) => { await store.sendMessage(selectedTask.id, msg, images); }}
             onSwitchModel={async (providerId) => { await switchSubscription(selectedTask.id, providerId); await store.refreshTasks(); }} />
         ) : (
           <EmptyWorkspace focusSignal={composerFocus} activeProjectName={projects.find((p) => p.id === activeProjectId)?.name ?? null}
