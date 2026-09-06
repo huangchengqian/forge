@@ -73,6 +73,8 @@ export type TaskManagerOptions = {
   intentRouter?: { classify: (input: string) => Promise<IntentResult> };
   /** Injectable chat channel (tests); answers conversation turns without a provider. */
   chat?: (endpoint: ProviderEndpoint, system: string, messages: readonly ChatMessage[]) => Promise<string>;
+  /** Injectable runtime (tests); replaces the built fake/Pi runtime entirely. */
+  runtime?: AgentRuntime;
 };
 
 type ActiveEntry = {
@@ -121,6 +123,7 @@ export class TaskManager {
   constructor(private readonly opts: TaskManagerOptions) {}
 
   private async buildRuntime(provider: string, modelId: string, goal: string): Promise<AgentRuntime> {
+    if (this.opts.runtime) return this.opts.runtime;
     if (this.opts.runtimeKind === "fake") {
       const vars = extractTemplateVars(goal);
       const rt = new FakeRuntime(this.opts.forgeHome, {
@@ -790,6 +793,22 @@ export class TaskManager {
     }
     const text = message.trim();
     if (!text) return { ok: false, message: "empty message" };
+    // Mid-run steering: an ACTIVE session gets the message queued into the
+    // running agent (consumed at the next turn boundary, run keeps going) and
+    // the call returns at once — the desktop stays responsive while the agent
+    // works. An IDLE session takes the regular prompt path, which waits for
+    // the turn so failures surface in the response.
+    if (this.active.has(taskId) && entry.runtime.steer) {
+      await appendEvent(taskId, "AGENT_EVENT", { piEvent: { type: "user_message", text } });
+      try {
+        await entry.runtime.steer(entry.session, text);
+        return { ok: true, message: "steered" };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await appendEvent(taskId, "AGENT_EVENT", { piEvent: { type: "turn_error", error: msg } });
+        return { ok: false, message: msg };
+      }
+    }
     await appendEvent(taskId, "AGENT_EVENT", { piEvent: { type: "user_message", text } });
     try {
       const turn = await entry.runtime.prompt(entry.session, text, { deadlineMs: 5 * 60_000 });

@@ -146,6 +146,11 @@ export class PiRuntime implements AgentRuntime {
     await pi.client.setModel(model.provider, model.modelId);
   }
 
+  async steer(session: RuntimeSession, message: string): Promise<void> {
+    const pi = session as PiRuntimeSession;
+    await pi.client.steer(message);
+  }
+
   async abort(session: RuntimeSession): Promise<void> {
     const pi = session as PiRuntimeSession;
     await pi.client.abort();

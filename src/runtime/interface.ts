@@ -36,6 +36,14 @@ export interface AgentRuntime {
   createSession(opts: CreateSessionOptions): Promise<RuntimeSession>;
   prompt(session: RuntimeSession, message: string, opts?: PromptOptions): Promise<TurnResult>;
   /**
+   * Deliver a mid-run steering message to a session that is currently
+   * executing a prompt. The runtime queues it with the agent; it is consumed
+   * at the next turn boundary without ending the in-flight run. Only called
+   * while the session is known-active; delivering to an idle session is not
+   * defined. Runtimes without steering support omit this method.
+   */
+  steer?(session: RuntimeSession, message: string): Promise<void>;
+  /**
    * Switch the session to a different model mid-flight (steering). The
    * runtime must preserve conversation history and workspace state. Runtimes
    * that cannot switch (e.g. fake) treat this as a no-op and resolve.

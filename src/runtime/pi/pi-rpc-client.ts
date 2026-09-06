@@ -183,6 +183,16 @@ export class PiRpcClient {
   }
 
   /**
+   * Deliver a mid-run steering message to the agent. Pi queues it and the
+   * agent consumes it at the next turn boundary without ending the current
+   * run — agent_settled keeps waiting until steered turns finish too.
+   */
+  async steer(message: string): Promise<void> {
+    const res = await this.sendAsync("steer", { message });
+    if (!res.success) throw new Error(res.error ?? "steer failed");
+  }
+
+  /**
    * Switch the session's model mid-flight. Pi's `set_model` resolves against
    * its available-model snapshot (all providers declared in models.json), so
    * this works across vendors/protocols without rebuilding the session.
