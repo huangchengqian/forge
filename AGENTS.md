@@ -4,658 +4,390 @@
 
 This document defines the development rules for AI coding agents working on Forge.
 
-Forge is an autonomous engineering agent system.
-
-The purpose of this document is to prevent architectural drift during development.
+The purpose is to prevent architectural drift during development.
 
 Every implementation decision must respect these rules.
 
 ---
 
-# 2. Project Identity
-
+## 2. Project Identity
 
 Forge is not:
 
 - a chatbot
 - a coding assistant wrapper
-- a modified Pi distribution
-- a UI project
-
+- a Pi fork
 
 Forge is:
 
-An autonomous engineering orchestration system built on top of an Agent Runtime.
-
+A desktop engineering agent that uses LLM as brain and deterministic guardrails as safety net.
 
 The core value of Forge is:
 
-- task lifecycle control
-- autonomous planning
-- execution management
-- verification
-- recovery
-- memory
-
+- completion verification (don't trust "model says done")
+- guardrails (permission, undo journal, cost budget, stuck detection)
+- recovery (event log, crash resume, audit trail)
 
 ---
 
-# 3. Architecture Principle
+## 3. Architecture Principle
 
+Two layers, clean boundary.
 
-Forge consists of two major layers.
-
-
-## Forge Layer
+## Agent Layer (Forge)
 
 Responsible for:
 
-- understanding engineering goals
-- planning tasks
-- managing execution lifecycle
-- validating results
-- deciding completion
-- maintaining memory
+- assembling Pi AgentLoopConfig with guardrail hooks
+- guardrails: permission, verification, cost, stuck detection
+- event log + SSE streaming
+- crash recovery
+- HTTP API + desktop UI
 
-
-## Runtime Layer
+## Runtime Layer (Pi)
 
 Responsible for:
 
-- interacting with LLM
-- executing turns
-- calling tools
-- editing files
-- running commands
-
+- LLM communication (multi-provider streaming)
+- agent loop (query → tool calls → results → repeat)
+- tool execution (read/write/edit/bash/grep)
+- context compaction
+- extension system
 
 The boundary:
 
+```
+Forge (guardrails) → AgentLoopConfig hooks → Pi (agent loop)
+```
 
-Forge decides:
-
-"What should happen next?"
-
-
-Runtime decides:
-
-"How should this action be performed?"
-
-
+Forge injects guardrails as callbacks. Pi owns the loop. One loop, not two.
 
 ---
 
-# 4. Runtime Rules
+## 4. Integration Rules
 
-Pi is part of the Forge stack (vendored at `pi/`) and is evolved directly by
-this project. There is no rule forbidding changes to Pi. What must be
-preserved is the boundary below: Forge business logic stays out of Pi core,
-and Forge core depends only on the runtime interface, never on Pi
-implementation. Fixes and features go into Pi where they belong there —
-upstreaming to the original repository is encouraged but optional.
+Pi is imported in-process as npm packages.
 
+- `@earendil-works/pi-agent-core` — agent loop + types
+- `@earendil-works/pi-ai` — multi-provider LLM API
+- `@earendil-works/pi-coding-agent` — tools + extensions
 
-## Rule 4.1
+### Rule 4.1
 
-Pi is a runtime.
+Forge guardrails are Pi AgentLoopConfig callbacks, not an outer loop.
 
-Pi is not Forge.
+Bad: Forge runs its own `while not done` loop around Pi.
 
+Good: Forge assembles `AgentLoopConfig` with `beforeToolCall` / `afterToolCall` / `shouldStopAfterTurn` and calls `agentLoop()`.
 
-Do not move Forge business logic into Pi core.
+### Rule 4.2
 
+Forge does not duplicate Pi capabilities.
 
-Bad:
+Pi already has: agent loop, tools, compaction, multi-provider, streaming, extensions.
 
+Forge adds: guardrails, verification, event log, recovery, UI.
 
-Pi Agent Loop
+If Pi has it, use it. Don't rebuild.
 
-+
+### Rule 4.3
 
-Forge State Machine
-
-+
-
-Memory
-
-+
-
-Planner
-
-
-Good:
-
-
-Forge
-
-↓
-
-Runtime Interface
-
-↓
-
-Pi Adapter
-
-↓
-
-Pi
-
-
-
----
-
-## Rule 4.2
-
-Runtime must remain replaceable.
-
-
-The following should not depend on Pi:
-
-
-- Orchestrator
-- Task Model
-- Planner
-- Observer
-- Memory
-- Event System
-
-
-
----
-
-## Rule 4.3
-
-Do not directly import Pi implementation into Forge Core.
-
-
-Forbidden:
-
-
-core/orchestrator
-
-imports
-
-runtime/pi
-
-
-
-Correct:
-
-
-core
-
-depends on
-
-runtime/interface
-
-
-
----
-
-# 5. Orchestrator Rules
-
-
-## Rule 5.1
-
-The Orchestrator is the brain of Forge.
-
-
-All autonomous behavior belongs here.
-
-
-Examples:
-
-
-Correct:
-
-
-"Should we retry this step?"
-
-belongs to:
-
-Orchestrator
-
-
-Incorrect:
-
-
-Runtime decides retry.
-
-
-
----
-
-## Rule 5.2
-
-The lifecycle must remain explicit.
-
-
-Required states:
-
-
-READY
-
-UNDERSTAND
-
-PLAN
-
-EXECUTE
-
-OBSERVE
-
-FIX
-
-COMPLETE
-
-
-
-Do not replace the state machine with:
-
-- hidden prompts
-- conversation history
-- implicit reasoning
-
-
-
----
-
-## Rule 5.3
-
-Completion is controlled by Forge.
-
-
-Never allow:
-
-
-LLM response:
-
-"Task completed"
-
-
-to directly trigger:
-
-
-COMPLETE
-
-
-
-Completion requires:
-
-
-- plan steps finished
-- success criteria verified
-
-
-
----
-
-# 6. Planning Rules
-
-
-## Rule 6.1
-
-Plans must be structured data.
-
-
-Bad:
-
-
-"Implement authentication"
-
-
-
-Good:
-
-
-Step 1:
-
-Create database model
-
-
-Success criteria:
-
-- migration exists
-- tests pass
-
-
-
----
-
-## Rule 6.2
-
-Plans must be executable and verifiable.
-
-
-Every step should contain:
-
-
-- objective
-- execution instruction
-- success criteria
-
-
-
----
-
-# 7. Observation Rules
-
-
-## Rule 7.1
-
-Observation is not LLM opinion.
-
-
-Bad:
-
-
-"The model thinks the code is correct"
-
-
-
-Good:
-
-
-Verification:
-
-
-file_exists
-
-file_contains
-
-command_exit_zero
-
-test_pass
-
-
-
----
-
-## Rule 7.2
-
-Observation must produce evidence.
-
-
-Every verification should answer:
-
-
-What was checked?
-
-How was it checked?
-
-What was the result?
-
-
-
----
-
-# 8. Memory Rules
-
-
-## Rule 8.1
-
-Memory belongs to Forge.
-
-
-Do not rely on:
-
-- chat history
-- runtime context
-- model memory
-
-
-
----
-
-## Rule 8.2
-
-Memory must have clear ownership.
-
+Forge core does not import Pi internals beyond the published package API.
 
 Allowed:
 
-
-Project Memory
-
-Task Memory
-
-Experience Memory
-
-
+```
+import { agentLoop } from "@earendil-works/pi-agent-core"
+import type { AgentLoopConfig, AgentContext } from "@earendil-works/pi-agent-core"
+```
 
 Forbidden:
 
-
-Random text storage without structure.
-
-
-
----
-
-# 9. UI Rules
-
-
-## Rule 9.1
-
-UI is a projection layer.
-
-
-The UI displays:
-
-Forge state
-
-
-The UI does not control:
-
-Forge state
-
-
+```
+import { someInternalFunction } from "@earendil-works/pi-agent-core/src/internals"
+```
 
 ---
 
-## Rule 9.2
+## 5. Guardrail Rules
 
-Do not build UI before core lifecycle works.
+### Rule 5.1
 
+Completion is not trusted.
 
-Development order:
+The LLM saying "I'm done" does not mean done.
 
+Completion requires verification, configured by trust level:
 
-1. Orchestrator
+- low: model stops → done (chat/questions)
+- medium: model stops → run build/test → pass → done
+- high: model stops → run all criteria + evaluator → pass → done
 
-2. Runtime Interface
+This is enforced in `shouldStopAfterTurn` hook.
 
-3. Task Model
+### Rule 5.2
 
-4. Verification
+Every tool call is checked before execution.
 
-5. Memory
+`beforeToolCall` hook:
+1. Guard policy (capability classification + rule evaluation)
+2. Undo journal (backup file before write/edit)
+3. Approval relay (ask → desktop dialog)
 
-6. UI
+A denied tool call is blocked. A destructive tool call terminates the session.
 
+### Rule 5.3
 
+Stuck detection prevents infinite loops.
+
+`afterToolCall` + `shouldStopAfterTurn` hooks detect:
+- repeated action-observation pairs (4 times)
+- repeated action-error pairs (4 times)
+- agent monologue without tool calls (4 times)
+- alternating pattern A→B→A→B (6 times)
+
+### Rule 5.4
+
+Cost is bounded.
+
+`shouldStopAfterTurn` checks cost budget. When exhausted, session stops.
+
+### Rule 5.5
+
+Errors are recovered transparently (参考 Claude Code).
+
+`shouldStopAfterTurn` attempts recovery before surfacing errors:
+- Output truncated → inject "continue" steering → retry (max 3)
+- Empty response → inject "try again" steering → retry (max 3)
+- API error → inject error info → retry (max 3)
+- Recovery exhausted → error surfaced to user
+
+This is the error withholding pattern: recovery succeeds = user never sees the error.
+
+### Rule 5.6
+
+Cache stability is maintained (参考 Claude Code).
+
+`transformContext` considers prompt cache:
+- Tool array sorted by name (stable cache key)
+- System prompt split into cache segments (org/global/none scope)
+- Sticky latch: dynamic params once set are kept
+- Non-Anthropic providers skip cache strategy
 
 ---
 
-# 10. Development Process
+## 6. Verification Rules
 
+### Rule 6.1
 
-Before implementing any feature:
+Verification is deterministic.
 
+Bad: "The model thinks the code is correct."
 
-First answer:
+Good:
 
+```
+file_exists
+file_contains
+command_exit_zero
+test_pass
+git_diff_contains
+directory_exists
+file_not_contains
+```
+
+### Rule 6.2
+
+Verification commands are restricted.
+
+Only these run automatically:
+- project runners: npm/pnpm/yarn/bun test|lint|typecheck|build
+- type checker: npx tsc --noEmit
+- test runner: node --test
+- read-only: cat, ls, head, tail, wc, stat, file, grep, diff, du, test
+
+Anything else requires an explicit Guard allow rule.
+
+### Rule 6.3
+
+Every verification produces evidence.
+
+```
+What was checked?
+How was it checked?
+What was the result?
+```
+
+---
+
+## 7. Event Rules
+
+### Rule 7.1
+
+All agent events are logged.
+
+Pi's event stream is consumed and written to a per-session JSONL event log.
+
+The log is the source of truth for:
+- SSE streaming (replay + tail follow)
+- crash recovery
+- audit trail
+
+### Rule 7.2
+
+Event log writes are FIFO-ordered.
+
+Concurrent `appendFile` calls race in the libuv threadpool. Per-session Promise chain ensures call-order persistence.
+
+---
+
+## 8. Recovery Rules
+
+### Rule 8.1
+
+Sessions are recoverable.
+
+A crashed session can be resumed because:
+- session state is persisted (session.json)
+- event log has the full history (events.jsonl)
+- undo journal has file backups (journal.jsonl)
+
+### Rule 8.2
+
+Schema migrations are forward-only.
+
+When the data model changes, `schema.ts` adds a migration. Old sessions are migrated on load.
+
+---
+
+## 9. UI Rules
+
+### Rule 9.1
+
+UI is the only entry point.
+
+Users never touch CLI, API, or event log. Everything flows through the desktop UI.
+
+UI determines what Forge can do. A guardrail capability without a UI entry point does not exist for the user.
+
+### Rule 9.2
+
+Every guardrail must have a UI entry point.
+
+| Guardrail | UI component |
+|---|---|
+| Guard ask (approval) | ApprovalDialog (real-time popup) |
+| Completion verification | VerificationPanel (criteria + pass/fail + evidence) |
+| Undo journal | DiffView + undo button |
+| Cost budget | CostGauge (spent / budget) |
+| Stuck detection | StuckWarning (pattern + suggestion) |
+| Steering | Mid-run input box |
+| Streaming | SessionView (real-time conversation) |
+| Session management | SessionList + StatusBar |
+| Project/workspace | Sidebar + project selector |
+| Model config | SettingsPage |
+| Trust level | Composer (low/medium/high selector) |
+| Abort/resume | Stop button + Resume button |
+
+### Rule 9.3
+
+Guardrails and UI are designed together.
+
+Build order:
+1. Agent runner (Pi loop + hooks)
+2. Guardrails + event types + HTTP API (同期 — 护栏产出事件，API 传输事件，UI 消费事件)
+3. Completion verification + stuck detection
+4. Desktop UI (consume event stream + collect user input)
+5. Recovery + compaction + steering
+6. Benchmark
+
+---
+
+## 10. Development Process
+
+Before implementing any feature, answer:
 
 1. What problem does this solve?
-
-2. Which layer owns this responsibility?
-
-3. What is the input?
-
-4. What is the output?
-
-5. What events are produced?
-
-6. How is it tested?
-
-
+2. Is this a guardrail or a Pi capability?
+3. Which AgentLoopConfig hook does it plug into?
+4. What is the input?
+5. What is the output?
+6. What events are produced?
+7. How is it tested?
 
 ---
 
-# 11. Code Organization Rules
-
+## 11. Code Organization
 
 Prefer:
 
-
-small modules
-
-clear ownership
-
-explicit interfaces
-
-
+- small modules
+- clear ownership
+- explicit interfaces
+- guardrails as pure functions
 
 Avoid:
 
-
-large services
-
-cross-layer dependencies
-
-hidden state
-
-
+- large services
+- state in guardrails (state lives in Pi context + event log)
+- cross-layer dependencies
+- duplicating Pi functionality
 
 ---
 
-# 12. Change Rules
-
-
-When modifying existing code:
-
+## 12. Change Rules
 
 Do not:
-
 
 - rewrite unrelated modules
 - introduce unnecessary frameworks
 - change architecture without discussion
 
-
-
 Prefer:
-
 
 - minimal changes
 - incremental commits
 - preserving boundaries
 
-
-
 ## Branch discipline
 
+`main` is always releasable.
 
-`main` is always releasable: every push runs the release gate in CI, and
-`scripts/release-check.sh` must pass before merging anything into it.
+Work on a short-lived branch (`feat/...`, `fix/...`) when the change crosses layers or touches the hook contract.
 
-
-Work on a short-lived branch (`feat/…`, `fix/…`) when the change:
-
-
-- crosses layers or touches the runtime interface contract
-- spans multiple sessions, or may stay unfinished for a while
-- is an experiment, or a behavior/policy change worth reviewing in isolation
-
-
-Small, obviously-green changes (copy, styling, docs, focused bug fixes) go
-directly to `main` — branch ceremony on those is friction, not safety.
-
-
-Branches are created when the work starts, never in advance: a branch that
-points at `main` with no commits is noise. Merge back once the release gate
-passes; delete the branch after merging.
-
-
-Run the gate as a STANDALONE step and check its result before merging or
-pushing — never chain it with `&&`/pipes into the merge itself (a piped
-gate loses its exit code, and a wrong working directory silently skips it).
-
-
+Small, obviously-green changes go directly to `main`.
 
 ---
 
-# 13. First Development Goal
+## 13. First Development Goal
 
-
-The first milestone is not a product.
-
-
-The first milestone is proving:
-
-
-Forge can control Pi and complete a verified engineering task.
-
+Prove: Pi agentLoop + Forge guardrails can complete a verified engineering task.
 
 Required flow:
 
+```
+User goal
+    ↓
+agentLoop(prompt, context, config with hooks)
+    ↓
+LLM queries, calls tools, gets results
+    ↓
+shouldStopAfterTurn → verify completion
+    ↓
+Session done (verified)
+```
 
-User Task
+No UI. No memory. No multi-agent.
 
-
-↓
-
-Create TaskSession
-
-
-↓
-
-UNDERSTAND
-
-
-↓
-
-PLAN
-
-
-↓
-
-EXECUTE using Pi
-
-
-↓
-
-OBSERVE
-
-
-↓
-
-COMPLETE
-
-
+Only prove the loop works and guardrails fire.
 
 ---
 
-# 14. Final Principle
+## 14. Final Principle
 
+The intelligence comes from the LLM.
 
-Do not build a smarter chatbot.
+The trustworthiness comes from guardrails.
 
-
-Build an engineering system.
-
-
-The intelligence of Forge comes from:
-
-- explicit lifecycle
-- verification
-- recovery
-- memory
-- control
-
-
-Not from:
-
-- longer prompts
-- more tools
-- more UI
-
+Do not build a state machine to replace LLM judgment.
+Do not trust LLM judgment without guardrails.

@@ -1,15 +1,14 @@
 # Forge Design Specification
 
-
 # 1. Project Definition
 
-Forge is an autonomous engineering agent system.
+Forge is a desktop engineering agent.
 
-Forge is not a coding assistant.
+Forge is not a chatbot.
+Forge is not a coding assistant wrapper.
+Forge is not a Pi fork.
 
-Forge is not a UI wrapper.
-
-Forge is an orchestration system that enables an AI agent to independently execute software engineering tasks.
+Forge adds a deterministic guardrail layer on top of Pi's LLM-driven agent loop.
 
 The goal:
 
@@ -19,550 +18,428 @@ Transform:
 
 into:
 
-"AI completes engineering objectives under supervision"
+"AI completes engineering objectives under verified supervision"
 
-
+---
 
 # 2. Core Philosophy
 
-Forge introduces an engineering control layer above the Agent Runtime.
+The LLM is the brain. Guardrails are the safety net.
+
+This is not a state machine. This is not "plan ahead, execute, observe, fix."
+
+The agent loop is Pi's `agentLoop`: query LLM → parse tool calls → execute tools → feed results → repeat. The LLM decides what to do, in what order, and when it's done.
+
+Forge's job is to make that loop trustworthy:
+
+- check every tool call for permission
+- back up every file before mutation
+- verify completion before accepting "done"
+- detect when the agent is stuck
+- bound the cost
+- log everything for audit and recovery
+
+---
+
+# 3. Architecture
+
+```
+Desktop (Tauri + React)
+    │  HTTP + SSE
+Forge Server (Node)
+    │
+    ├── AgentRunner
+    │   │  装配 AgentLoopConfig + 调 Pi agentLoop
+    │   │
+    │   ├── Pi AgentLoop (LLM 驱动主循环)
+    │   │   ├── query LLM (streaming)
+    │   │   ├── parse tool calls
+    │   │   ├── execute tools (read/write/edit/bash/grep)
+    │   │   ├── feed results to context
+    │   │   ├── compaction (Pi built-in)
+    │   │   └── repeat until done or stopped
+    │   │
+    │   └── Guardrail Hooks (注入到 AgentLoopConfig)
+    │       ├── beforeToolCall → Guard + Journal
+    │       ├── afterToolCall → Stuck detection
+    │       ├── shouldStopAfterTurn → Cost + Completion verification
+    │       ├── transformContext → Token management
+    │       └── getSteeringMessages → Mid-run intervention
+    │
+    └── Infrastructure
+        ├── Event log (FIFO JSONL + SSE)
+        ├── Session store + schema migration
+        ├── Recovery service
+        ├── Approval hub (Guard ask → desktop dialog)
+        ├── Undo / Diff (git or journal)
+        └── Project registry
+```
+
+---
+
+# 4. Pi Integration
+
+Pi is imported in-process, not spawned as subprocess.
+
+```
+import { agentLoop } from "@earendil-works/pi-agent-core"
+import type { AgentLoopConfig, AgentContext, AgentMessage } from "@earendil-works/pi-agent-core"
+import { Models } from "@earendil-works/pi-ai"
+```
+
+Pi provides:
+
+- `agentLoop(prompts, context, config, signal, streamFn)` → `EventStream<AgentEvent, AgentMessage[]>`
+- `AgentLoopConfig` with hooks: `beforeToolCall`, `afterToolCall`, `shouldStopAfterTurn`, `transformContext`, `prepareNextTurn`, `getSteeringMessages`, `convertToLlm`
+- `AgentContext`: messages, systemPrompt, tools, model
+- `AgentEvent`: agent_start, turn_start, message_start, text_delta, tool_call, tool_result, turn_end, agent_end
+- Built-in tools: read, write, edit, bash, grep, find, ls, powershell
+- Built-in compaction: branch-summarization
+- Multi-provider: OpenAI, Anthropic, Google, Bedrock, Vertex, custom
+
+Forge provides:
+
+- `AgentLoopConfig` assembly with guardrail hooks
+- Guard policy + undo journal
+- Deterministic verification (7 validators + command policy)
+- Stuck detection (4 patterns)
+- Cost guard (budget tracking + circuit breaker)
+- Event log (FIFO JSONL + SSE streaming)
+- Recovery (session state + event log + journal)
+- HTTP API (session-centric)
+- Desktop UI (conversation + tool calls + verification)
+
+---
+
+# 5. Agent Loop
+
+Pi's `agentLoop` is the only loop.
+
+```
+while (hasMoreToolCalls || pendingMessages.length > 0) {
+    1. Process steering messages (inject mid-run)
+    2. Query LLM (streaming, via streamFn)
+    3. Parse assistant response (text + tool calls)
+    4. For each tool call:
+        a. beforeToolCall hook → Guard check + Journal backup
+        b. Execute tool (Pi built-in or custom)
+        c. afterToolCall hook → Stuck detection
+    5. Feed tool results to context
+    6. shouldStopAfterTurn hook → Cost + Completion verification
+    7. prepareNextTurn hook → Compaction (if needed)
+    8. Continue or stop
+}
+```
 
-The architecture contains two layers.
+No state machine. No UNDERSTAND/PLAN/EXECUTE/OBSERVE/FIX states.
 
+The LLM reads code, plans, executes, sees results, fixes, and decides completion — all within this single loop.
 
-## Layer 1: Forge Orchestrator
+---
 
-Responsible for:
+# 6. Guardrail Model
 
-- understanding goals
-- creating plans
-- managing lifecycle
-- verifying results
-- handling failures
-- maintaining memory
+## beforeToolCall
 
+Called before every tool execution, after argument validation.
 
-## Layer 2: Agent Runtime
+```
+Input: toolName, args, context
+Output: { block?: boolean, reason?: string, terminate?: boolean }
+```
 
-Responsible for:
+Checks:
+1. Guard policy (classifyCapabilities → evaluateToolCall)
+   - read → allow
+   - write/edit → allow (journal-backed)
+   - bash → check destructive/network/git patterns → ask
+   - destructive → deny + terminate
+2. Undo journal (if write/edit: backup file)
+3. Approval relay (if ask: send to desktop, wait for response)
 
-- LLM interaction
-- tool calling
-- file modification
-- command execution
-- context management
+## afterToolCall
 
+Called after every tool execution, before result is emitted.
 
-The fundamental boundary:
+```
+Input: toolCall, args, result, isError
+Output: { content?, details?, isError?, terminate? }
+```
 
-Forge decides:
+Checks:
+1. Stuck detection (track tool_call + result pattern)
 
-"What should happen next?"
+## shouldStopAfterTurn
 
+Called after each turn completes (LLM response + tool executions).
 
-Runtime decides:
+```
+Input: message, toolResults, context, newMessages
+Output: boolean (true = stop)
+```
 
-"How to execute this action?"
+Checks (in order):
+1. **Error recovery**（透明，参考 Claude Code）:
+   - Output truncated (max_tokens) → inject "continue" steering → return false (max 3 retries)
+   - Empty response → inject "try again" steering → return false (max 3 retries)
+   - API error (if recoverable) → inject error info → return false
+2. Cost guard: is budget exhausted? → return true
+3. Stuck detection: is the agent repeating? → return true
+4. Completion verification (by trust level):
+   - low: return false (let model decide)
+   - medium: run build/test → pass → true
+   - high: run criteria + evaluator → pass → true
 
+### Error withholding pattern (参考 Claude Code)
 
+API/LLM errors are not immediately surfaced to the user. The hook attempts transparent recovery first:
+- Recovery succeeds → agent continues as if nothing happened
+- Recovery exhausted (3 attempts) → error surfaced
 
-# 3. Runtime Selection
+This prevents premature session termination from transient API issues (truncation, empty response, prompt-too-long).
 
-Forge uses Pi as the initial Agent Runtime.
+### Cache stability (参考 Claude Code)
 
-Pi is treated as execution infrastructure.
+`transformContext` hook also considers prompt cache stability:
+- Tool array sorted by name (stable cache key)
+- System prompt split into segments with different cache scopes (org/global/none)
+- Sticky latch: dynamic parameters once set are kept (avoid busting server cache)
+- Non-Anthropic providers skip cache strategy (OpenAI API doesn't support prompt caching scope)
 
-Forge must not become a modified Pi distribution.
+If verification fails, inject steering message: "Verification failed: {reason}. Please continue fixing." and return false.
 
-The relationship:
+## transformContext
 
+Called before each LLM query, after convertToLlm.
 
-Forge
+```
+Input: messages, signal
+Output: messages (possibly truncated)
+```
 
-↓
+Checks:
+1. Token estimation (character-based approximation)
+2. If approaching context window: truncate old observations
+3. (Future) Auto-compaction via Pi's prepareNextTurn
 
-Runtime Interface
+---
 
-↓
+# 7. Completion Model
 
-Pi Runtime Adapter
+Completion is not trusted.
 
-↓
+The LLM saying "I finished" does not trigger completion.
 
-Pi
+Completion is verified based on trust level:
 
+## Low trust (chat, questions)
 
-The purpose of this separation:
+Model stops → done. No verification.
 
-- preserve Pi evolution capability
-- keep Forge architecture independent
-- allow future runtime replacement
+Used for: explaining code, answering questions, generating snippets.
 
+## Medium trust (routine engineering)
 
+Model stops → run project checks (npm test / npm run build) → pass → done.
 
-# 4. System Architecture
+If checks fail → tell the model → continue.
 
+Used for: creating files, adding functions, routine bug fixes.
 
-Forge
+## High trust (safety-critical, autonomous)
 
-├── Orchestrator
+Model stops → run all configured success criteria + evaluator → pass → done.
 
-├── Runtime Layer
+Criteria examples:
+```
+file_exists: src/auth/controller.ts
+command_exit_zero: npm test
+file_contains: src/auth/controller.ts → "export"
+```
 
-├── Task Model
+If any criterion fails → tell the model → continue.
 
-├── Verification System
+Used for: unattended tasks, migrations, security-sensitive changes.
 
-├── Memory System
+---
 
-├── Event System
+# 8. Verification System
 
-└── User Interface
+Seven deterministic validators:
 
+| Validator | Checks |
+|---|---|
+| file_exists | fs.access |
+| file_contains | readFile + String.includes |
+| file_not_contains | readFile + !String.includes |
+| directory_exists | fs.stat + isDirectory |
+| command_exit_zero | spawn bash, check exit 0, 30s timeout |
+| test_pass | command_exit_zero, 120s timeout |
+| git_diff_contains | git diff + String.includes |
 
+Command policy (verification commands are restricted):
 
-# 5. Orchestrator
+- Registered checks: npm/pnpm/yarn/bun test|lint|typecheck|build, npx tsc --noEmit, node --test
+- Read-only commands: cat, ls, head, tail, wc, stat, file, grep, diff, du, test
+- Anything else: blocked (no approval channel for verification)
 
+Path enforcement:
+- Absolute paths rejected
+- Path escapes (../) rejected
+- All paths resolved within workspace
 
-Orchestrator is the core of Forge.
+---
 
-It owns the engineering lifecycle.
+# 9. Guard System
 
+Capability model (8 categories):
 
-The lifecycle:
+| Capability | Default | Notes |
+|---|---|---|
+| read | allow | ls, grep, find, read |
+| write | allow | journal-backed (restorable) |
+| edit | allow | journal-backed (restorable) |
+| bash | ask | approval relay to desktop |
+| network | ask | curl, wget, ssh |
+| git | ask | all git commands |
+| destructive | deny + terminate | sudo, mkfs, rm -rf /, fork bomb, git push --force |
+| unknown | ask | unrecognized tools |
 
+Rules:
+- First match wins (specific `contains` rules before generic)
+- "Always allow" writes a rule to ~/.forge/guard.json
+- Policy file re-read on every call (live rule updates)
 
-READY
+Undo journal:
+- Before every write/edit: copy original file to ~/.forge/undo/{sessionId}/files/
+- Journal entry: path, backup path, action (modified/created), timestamp
+- Undo: restore backups (or delete created files)
 
-↓
+---
 
-UNDERSTAND
+# 10. Event System
 
-↓
+Events flow from Pi's agent loop to the event log and SSE stream.
 
-PLAN
+```
+Pi AgentEvent → Forge agent-runner → event-log.ts (JSONL) → SSE → Desktop
+```
 
-↓
+Event types:
+- SESSION_STARTED, SESSION_ENDED
+- TURN_STARTED, TURN_ENDED
+- TEXT_DELTA (streaming text)
+- TOOL_CALL, TOOL_RESULT
+- AGENT_EVENT (raw Pi events for conversation view)
 
-EXECUTE
+Event log:
+- Per-session JSONL file: ~/.forge/events/{sessionId}.events.jsonl
+- FIFO append queue (per-session Promise chain, prevents write reordering)
+- Read for SSE replay (seq-based, stable across reconnects)
 
-↓
+---
 
-OBSERVE
+# 11. Recovery System
 
-↓
+A crashed session is resumable.
 
-FIX
+State persisted:
+- session.json: messages, model, workspace, cost, status
+- {sessionId}.events.jsonl: full event history
+- undo/{sessionId}/journal.jsonl: file backup entries
 
-↓
+Recovery flow:
+1. Load session.json → get messages, workspace, model
+2. Read events.jsonl → reconstruct state
+3. Check undo journal → optional restore
+4. Resume: call `agentLoopContinue(context, config, signal, streamFn)`
 
-COMPLETE
+---
 
+# 12. Data Model
 
+## Session
 
-# 6. State Machine
+```
+id: string
+kind: "conversation" | "task"
+goal: string
+workspace: string
+model: { provider, modelId }
+messages: AgentMessage[]   ← Pi's message type, full conversation history
+status: "running" | "completed" | "failed" | "cancelled"
+failureReason: string | null
+cost: { total: number }
+completionCriteria: SuccessCriterion[]  ← optional, for high-trust tasks
+lastEvaluation: EvaluationResult | null
+createdAt: number
+updatedAt: number
+```
 
+No TaskSession. No Plan. No PlanStep. No Observation.
+The conversation IS the task. Messages contain everything.
 
-## READY
+---
 
-Create task session.
+# 13. Desktop UI
 
+UI is the only entry point for human-computer interaction.
 
+Users never touch CLI, API, or event log. Everything flows through the desktop UI.
 
-## UNDERSTAND
+UI determines what Forge can do. A guardrail capability without a UI entry point does not exist for the user.
 
-Analyze user goal and repository context.
+Shows:
+- Conversation (user messages, assistant text, tool calls, tool results)
+- Verification panel (criteria, pass/fail, evidence)
+- Diff view (git or journal) + undo button
+- Approval dialog (real-time, when Guard asks)
+- Cost gauge (spent / budget / remaining)
+- Stuck warning (pattern type + suggestion)
+- Session list + status bar
+- Project selector + settings (provider/model/effort)
+- Composer with trust level selector (low/medium/high)
+- Mid-run steering input box
+- Stop + Resume buttons
 
-Output:
+Does not show:
+- Plan steps (no plan)
+- State machine transitions (no state machine)
+- Fix attempts (no FIX state)
 
-Understanding Context
+### Design constraint
 
+Guardrails and UI are designed together. Every guardrail hook's output must have a corresponding UI component that can consume it.
 
+Event types must cover everything the UI needs: agent events (message_start/update/end, tool_call, tool_result) AND guardrail events (GUARD_APPROVAL_REQUEST, VERIFICATION_RESULT, COST_UPDATE, STUCK_WARNING, COMPACTION).
 
-## PLAN
+HTTP API exists to serve the UI — not the other way around.
 
-Generate structured engineering plan.
-
-Output:
-
-Plan
-
-
-
-## EXECUTE
-
-Send execution instructions to runtime.
-
-Runtime performs:
-
-- analysis
-- modification
-- testing
-
-
-
-## OBSERVE
-
-Verify execution result.
-
-Observation must be deterministic.
-
-Examples:
-
-- file exists
-- file contains
-- test passed
-- command succeeded
-
-
-
-## FIX
-
-Recover from failure.
-
-Possible actions:
-
-- retry
-- adjust plan
-- create new execution step
-
-
-
-## COMPLETE
-
-Only Forge can declare completion.
-
-Conditions:
-
-- all steps executed
-- all success criteria passed
-
-
-
-# 7. Runtime Boundary
-
-
-Forge never directly:
-
-- calls LLM
-- executes shell
-- edits files
-
-
-All execution goes through Runtime.
-
-
-
-Runtime interface:
-
-
-createSession()
-
-executeTurn()
-
-subscribeEvents()
-
-closeSession()
-
-
-
-# 8. Double Loop Model
-
-
-Forge has an outer loop.
-
-Outer loop:
-
-Task lifecycle.
-
-
-UNDERSTAND
-
-↓
-
-PLAN
-
-↓
-
-EXECUTE
-
-↓
-
-OBSERVE
-
-↓
-
-FIX
-
-↓
-
-COMPLETE
-
-
-
-Pi has an inner loop.
-
-Inner loop:
-
-Agent execution.
-
-
-Turn
-
-↓
-
-Tool call
-
-↓
-
-Tool result
-
-↓
-
-Turn result
-
-
-
-The two loops are independent.
-
-
-
-# 9. Completion Model
-
-
-The model saying:
-
-"I finished"
-
-does not mean completion.
-
-
-Completion requires:
-
-Plan validation.
-
-
-Example:
-
-
-Step:
-
-Implement authentication API
-
-
-Success Criteria:
-
-
-file_exists:
-
-src/auth/controller.ts
-
-
-command_exit_zero:
-
-npm test
-
-
-Only after validation:
-
-
-COMPLETE
-
-
-
-# 10. Task Model
-
-
-TaskSession:
-
-
-id
-
-goal
-
-state
-
-plan
-
-observations
-
-runtimeSessionId
-
-createdAt
-
-updatedAt
-
-
-TaskSession is the source of truth.
-
-
-
-# 11. Plan Model
-
-
-Plan is structured data.
-
-Not only natural language.
-
-
-Example:
-
-
-Step:
-
-Create user API
-
-
-Success Criteria:
-
-
-- controller file exists
-- unit tests pass
-- API responds correctly
-
-
-
-# 12. Memory System
-
-
-Memory belongs to Forge.
-
-Not runtime.
-
-
-Memory types:
-
-
-## Project Memory
-
-Repository knowledge.
-
-Examples:
-
-- architecture decisions
-- coding conventions
-
-
-## Task Memory
-
-Current task history.
-
-
-## Experience Memory
-
-General solutions and failure patterns.
-
-
-
-# 13. Event System
-
-
-Forge exposes lifecycle events.
-
-
-Events:
-
-
-state_changed
-
-plan_created
-
-step_started
-
-step_verified
-
-fix_started
-
-completed
-
-failed
-
-
-Runtime events remain internal.
-
-
-Examples:
-
-
-tool_call
-
-file_change
-
-terminal_output
-
-
+---
 
 # 14. Development Rules
 
+Rule 1: LLM is the brain. Guardrails are callbacks, not a loop.
 
-Rule 1:
+Rule 2: Don't trust "done." Verify by trust level.
 
-Do not build UI before core lifecycle works.
+Rule 3: Every tool call is checked. Every file mutation is journaled.
 
+Rule 4: Log everything. Events are the source of truth.
 
-Rule 2:
+Rule 5: Don't duplicate Pi. Use what Pi provides.
 
-Do not solve architecture problems with prompts.
-
-
-Rule 3:
-
-Every autonomous behavior must have:
-
-- state
-- input
-- output
-- verification
-
-
-Rule 4:
-
-Keep runtime replaceable.
-
-
+---
 
 # 15. First Milestone
 
-
-The first version should achieve:
-
-
-User:
-
-"Create a hello world API"
-
+User: "Create a TypeScript utility module with tests"
 
 Forge:
-
-
-UNDERSTAND
-
-↓
-
-PLAN
-
-↓
-
-EXECUTE
-
-↓
-
-OBSERVE
-
-↓
-
-COMPLETE
-
-
-No UI.
-
-No memory.
-
-No multi-agent.
-
-
-Only prove:
-
-
-Forge can control Pi and complete a verified engineering task.
-
+1. AgentRunner assembles AgentLoopConfig with guardrail hooks
+2. agentLoop starts: LLM reads workspace, creates util.ts, creates util.test.ts
+3. beforeToolCall: Guard allows write (journal backups)
+4. LLM runs `npm test`
+5. beforeToolCall: Guard allows bash (registered check)
+6. shouldStopAfterTurn: verify (test_pass: npm test → exit 0 → pass)
+7. Session done (verified)

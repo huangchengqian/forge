@@ -1,653 +1,286 @@
 # Forge Development Roadmap
 
-
 # 1. Development Philosophy
 
+UI is the only entry point. Users never touch CLI, API, or event log.
 
-Forge development follows a vertical slice approach.
+This means:
+- Every guardrail capability must have a UI entry point
+- Guardrails and UI are designed together, not sequentially
+- Event types must cover everything the UI needs to display
+- HTTP API exists to serve the UI, not the other way around
 
+Build order:
 
-The goal is not to build all components at once.
-
-
-The goal is to prove the complete autonomous engineering loop step by step.
-
-
-
-Each phase must produce a working system.
-
-
-
-The development priority:
-
-
-Core capability
-
-↓
-
-Runtime integration
-
-↓
-
-Verification
-
-↓
-
-Memory
-
-↓
-
-User experience
-
-
+```
+Agent loop (Pi integration)
+    ↓
+Guardrails + Event types + HTTP API (同期)
+    ↓
+Completion verification + Stuck detection
+    ↓
+Desktop UI (消费事件流 + 收集用户输入)
+    ↓
+Recovery + Compaction + Steering
+    ↓
+Benchmark
+```
 
 ---
 
-# 2. Phase 0 - Project Foundation
-
+# 2. Phase 1 - Skeleton (1-2 days)
 
 ## Goal
 
-
-Create a clean Forge project foundation.
-
-
+Pi agentLoop runs in-process. Events flow to stdout.
 
 ## Scope
 
-
-Implement:
-
-
-- repository structure
-- TypeScript environment
-- package management
-- basic build system
-- development scripts
-
-
-
-## Do not implement:
-
-
-- UI
-- memory
-- multi-agent
-- cloud service
-
-
+- Copy Forge code to new project
+- Delete state machine + RPC layer (~1700 lines)
+- Add `@earendil-works/pi-agent-core` + `pi-ai` dependencies
+- Write `agent-runner.ts`: minimal AgentLoopConfig (convertToLlm only)
+- Write minimal `Session` type
+- CLI `run.ts`: `runAgent(goal) → stream events → print` (debug only)
+- No guardrails, no UI, no server
 
 ## Expected Result
 
-
-The project can:
-
-- compile
-- run tests
-- execute a basic CLI command
-
-
+```
+$ npx tsx src/cli/run.ts "create hello.txt"
+[agent_start] [turn_start] [message_start] [text_delta: "Creating..."]
+[tool_call: write] [tool_result] [turn_end] [agent_end]
+hello.txt created.
+```
 
 ---
 
-# 3. Phase 1 - Minimal Autonomous Loop
-
+# 3. Phase 2 - Guardrails + Events + API (2-3 days)
 
 ## Goal
 
+Every tool call is checked. Every file mutation is journaled. Events flow to event log + SSE. Minimal HTTP API serves sessions.
 
-Prove Forge can control an Agent Runtime.
+Guardrails produce events. API transports events. UI will consume events (Phase 4). Build all three now.
 
+## Scope
 
+### Guardrail hooks
+- `beforeToolCall` → Guard policy (policy.ts) + Journal (journal.ts)
+- Event type extensions: GUARD_APPROVAL_REQUEST, GUARD_BLOCKED, COST_UPDATE
 
-This is the first important milestone.
+### Event flow
+- Pi AgentEvent → event-log.ts (FIFO append) → event-bus.ts
+- SSE stream → TaskEventStream (replay + tail + seq dedup)
 
+### HTTP API
+- `session-manager.ts`: workspace lock, session store, approval hub
+- POST /sessions (create), GET /sessions/:id/stream (SSE), POST /sessions/:id/abort, DELETE /sessions/:id
+- GET /sessions/:id/approvals, POST /sessions/:id/approvals/:reqId/approve|deny
+- GET /sessions/:id/diff, POST /sessions/:id/undo
 
+## Expected Result
 
-The system should support:
-
-
-User Task
-
-
-↓
-
-TaskSession
-
-
-↓
-
-UNDERSTAND
-
-
-↓
-
-PLAN
-
-
-↓
-
-EXECUTE
-
-
-↓
-
-OBSERVE
-
-
-↓
-
-COMPLETE
-
-
+```
+# POST /sessions {goal: "create hello.txt", workspace: "/tmp/test", trustLevel: "low"}
+# GET /sessions/:id/stream → SSE: SESSION_STARTED, TURN_STARTED, TOOL_CALL, TOOL_RESULT, TURN_ENDED, SESSION_ENDED
+# write to /etc/passwd → GUARD_BLOCKED event in SSE
+# write to workspace/hello.txt → allowed, journaled
+# bash with curl → GUARD_APPROVAL_REQUEST event → POST /approve → continue
+```
 
 ---
 
-## Required Components
-
-
-### Task Model
-
-
-Implement:
-
-
-- TaskSession
-- Plan
-- PlanStep
-- Observation
-
-
-
----
-
-### Orchestrator
-
-
-Implement:
-
-
-- lifecycle state machine
-- state transitions
-- execution flow
-
-
-
----
-
-### Runtime Interface
-
-
-Create:
-
-
-AgentRuntime interface
-
-
-
-Initial implementation:
-
-
-Pi Runtime Adapter
-
-
-
----
-
-### Verification
-
-
-Implement minimal validators:
-
-
-file_exists
-
-command_exit_zero
-
-
-
----
-
-## Example Task
-
-
-Input:
-
-
-"Create hello world API"
-
-
-
-Expected flow:
-
-
-UNDERSTAND:
-
-Analyze project
-
-
-PLAN:
-
-Create server file
-
-
-EXECUTE:
-
-Pi modifies files
-
-
-OBSERVE:
-
-Check file exists
-
-
-COMPLETE:
-
-
-
----
-
-# 4. Phase 2 - Execution Reliability
-
+# 4. Phase 3 - Completion Verification + Stuck Detection (1-2 days)
 
 ## Goal
 
+Don't trust "model says done." Detect stuck agents. Bound cost.
 
-Make Forge capable of recovering from failures.
+## Scope
 
+- `shouldStopAfterTurn` → error recovery (truncated/empty/error, max 3 retries, transparent) + cost guard + completion verification (by trust level)
+- `CompletionConfig`: trust level (low/medium/high) + criteria + maxCost + maxTurns
+- `afterToolCall` → stuck detection (4 patterns: action_observation_loop, action_error_loop, monologue, alternating_pattern)
+- `evaluation/deterministic-evaluator.ts` → post-completion scoring
+- Verification steering: "Verification failed: {reason}. Please continue."
+- Error withholding: API errors suppressed until recovery exhausted (参考 Claude Code)
+- `transformContext` → token estimation + truncation + cache stability (tool sorting, prompt segment caching)
+- Event types: VERIFICATION_RESULT, STUCK_WARNING, ERROR_RECOVERY
 
+## Expected Result
 
----
-
-## Add:
-
-
-## FIX State
-
-
-Support:
-
-
-EXECUTE
-
-↓
-
-OBSERVE
-
-↓
-
-FAIL
-
-↓
-
-FIX
-
-↓
-
-EXECUTE
-
-
+```
+# Task: "create util.ts with export"
+# Model creates util.ts (no export) → stops
+# shouldStopAfterTurn → file_contains: "export " → FAIL
+# VERIFICATION_RESULT event: {criterion: "file_contains", passed: false, message: "does not contain 'export'"}
+# Steering injected: "Verification failed: file does not contain 'export'. Please continue."
+# Model adds export → stops again
+# VERIFICATION_RESULT event: {passed: true} → SESSION_ENDED
+```
 
 ---
 
-## Retry Management
-
-
-Implement:
-
-
-Step retry limit
-
-
-Example:
-
-
-maximum 3 attempts
-
-
-
-Task retry limit
-
-
-Example:
-
-
-maximum 10 fixes
-
-
-
-Deadline control
-
-
-Example:
-
-
-maximum execution time
-
-
-
----
-
-## Failure Recording
-
-
-Store:
-
-
-- failed step
-- error information
-- previous attempts
-- recovery actions
-
-
-
----
-
-# 5. Phase 3 - Structured Planning
-
+# 5. Phase 4 - Desktop UI (3-5 days)
 
 ## Goal
 
+User completes a full workflow through the desktop UI. Never touches CLI or API.
 
-Improve planning capability.
+UI consumes the event stream (Phase 2) and API (Phase 2-3). Every guardrail capability has a UI entry point.
 
+## Scope
 
+### Layout
+- `App.tsx` + `Sidebar.tsx`: project selector + session list
+- `Composer.tsx`: input box + trust level selector (low/medium/high) + create session button
 
-Add:
+### Main view (consumes SSE events)
+- `SessionView.tsx`: conversation stream (MESSAGE_STARTED/UPDATE/ENDED + TEXT_DELTA + TOOL_CALL + TOOL_RESULT)
+- `ApprovalDialog.tsx`: popup when GUARD_APPROVAL_REQUEST event arrives → POST /approve or /deny
+- `VerificationPanel.tsx`: VERIFICATION_RESULT → criteria list + pass/fail + evidence
+- `DiffView.tsx`: GET /sessions/:id/diff → git diff or journal entries + undo button → POST /undo
+- `CostGauge.tsx`: COST_UPDATE event → spent / budget / remaining
+- `StuckWarning.tsx`: STUCK_WARNING event → pattern type + suggestion
+- `StatusBar.tsx`: session status + cost + stuck indicator
 
+### Settings
+- `SettingsPage.tsx`: provider config + model selection + effort level
+- Project management: add/remove/select projects (from old Forge desktop shell)
 
-- multi-step plans
-- step dependencies
-- plan versioning
-- dynamic replanning
+## Expected Result
 
-
-
----
-
-## Plan Evolution
-
-
-Initial:
-
-
-Static plan
-
-
-
-Future:
-
-
-Adaptive plan
-
-
-
-Example:
-
-
-Original plan:
-
-
-Step 1
-
-Step 2
-
-Step 3
-
-
-
-After failure:
-
-
-Step 2 replaced
-
-Step 4 added
-
-
+Full desktop experience:
+1. Select project → input goal → choose trust level → create
+2. Watch real-time conversation (text streaming + tool calls expanding)
+3. Approval popup appears → approve/deny → agent continues
+4. Verification panel shows criteria + pass/fail
+5. Review diff → undo if needed
+6. Cost gauge shows spending
+7. Stuck warning appears if agent loops
 
 ---
 
-# 6. Phase 4 - Memory System
-
+# 6. Phase 5 - Recovery + Compaction + Steering (2-3 days)
 
 ## Goal
 
+Crash recovery. Long conversation support. User can steer mid-run.
 
-Allow Forge to accumulate engineering knowledge.
+## Scope
 
+### Recovery
+- `recovery-service.ts` adapted to new Session model
+- Session list shows "recoverable" status for crashed sessions
+- Resume button → POST /sessions/:id/resume → agentLoopContinue
 
+### Compaction
+- `transformContext` hook → token estimation + truncation
+- `prepareNextTurn` hook → trigger Pi built-in compaction
+- COMPACTION event → UI shows compaction status
 
----
+### Steering
+- `getSteeringMessages` hook → connected to UI mid-run input box
+- POST /sessions/:id/steer → inject steering message
+- UI: input box visible during execution → type → send → agent picks up at next turn boundary
 
-## Project Memory
+## Expected Result
 
+```
+# Start task, kill process mid-execution
+# Session list shows "recoverable"
+# Click resume → session resumes from last event, agent continues
 
-Store:
-
-
-- architecture decisions
-- repository structure
-- coding patterns
-- important constraints
-
-
-
-Example:
-
-
-"This project uses repository pattern"
-
-"Authentication logic is located in service layer"
-
-
-
----
-
-## Task Memory
-
-
-Store:
-
-
-- previous executions
-- failures
-- solutions
-
-
+# Mid-execution: type "also add a README.md" in steering input
+# Agent picks up at next turn boundary, creates README.md too
+```
 
 ---
 
-## Memory Lifecycle
-
-
-Before task:
-
-
-Retrieve relevant memory
-
-
-
-During task:
-
-
-Update temporary memory
-
-
-
-After task:
-
-
-Persist useful knowledge
-
-
-
----
-
-# 7. Phase 5 - User Interface
-
+# 7. Phase 6 - Benchmark (1-2 days)
 
 ## Goal
 
+Golden tasks verify the architecture works end-to-end.
 
-Create a Codex-style engineering interface.
+## Scope
 
+- `scripted-runtime.ts` → Pi streamFn mock (deterministic tool responses)
+- `harness.ts` → runAgent with scripted runtime
+- `metrics.ts` → adapted to new Session model
+- Golden tasks: file creation, multi-step, fix-and-verify, stuck-loop
 
+## Expected Result
 
-Important:
+```
+=== golden_create_file [new-feature] Create hello.txt
+  -> state=completed wall=120ms retries=0 cost=$0.01 vfail=0 eval=100
 
+=== golden_verify_fail [new-feature] Create util.ts without export
+  -> state=completed wall=340ms retries=1 cost=$0.03 vfail=1→0 eval=95
 
-UI is a visualization of Forge lifecycle.
-
-
-
-UI must show:
-
-
-- current task
-- plan
-- execution progress
-- verification result
-- failures
-- memory
-
-
+=== golden_stuck_loop [recovery] Repeated failure
+  -> state=failed wall=5000ms cost=$0.15 stuck=action_observation_loop eval=20
+```
 
 ---
 
-## UI must not:
+# 8. Phase 7 - Memory (future)
 
+## Goal
 
-- become source of state
-- contain business logic
-- replace Orchestrator
+Semantic memory retrieval across sessions.
 
+Not priority until phases 1-6 are stable.
 
+## Scope
 
----
-
-# 8. Phase 6 - Advanced Capabilities
-
-
-Future capabilities:
-
-
-
-## Multiple Runtime Support
-
-
-Example:
-
-
-Pi
-
-OpenCode
-
-Custom Runtime
-
-
+- Memory format: file directory + frontmatter (~/.forge/memory/*.md)
+- Memory scan: read frontmatter (description + type + keywords)
+- Semantic retrieval: LLM side-query for relevance (like OpenHands findRelevantMemories)
+- `transformContext` hook: inject relevant memories before LLM query
+- Memory extraction: after session complete/failed, extract patterns
+- UI: memory browser in settings
 
 ---
 
-## Human Approval
+# 9. Phase 8 - Advanced (future)
 
+## MCP support
+Model Context Protocol servers as tool providers.
 
-Support checkpoints:
+## Sub-agents
+Pi AgentTool for multi-agent orchestration.
 
+## Workflow engine
+Deterministic orchestration for multi-step tasks (concurrency + budget + journal).
 
-Before execution
-
-Before destructive operations
-
-Before completion
-
-
-
----
-
-## Background Tasks
-
-
-Support:
-
-
-Long running tasks
-
-Scheduled execution
-
-Remote execution
-
-
+## Background tasks
+Long-running sessions, scheduled execution.
 
 ---
 
-## Multi Agent
+# 10. Current Priority
 
-
-Possible future:
-
-
-Planner Agent
-
-Executor Agent
-
-Reviewer Agent
-
-
-
-This should only happen after single-agent architecture is stable.
-
-
-
----
-
-# 9. Current Priority
-
-
-The current highest priority is:
-
-
-Build the smallest complete autonomous engineering loop.
-
-
+Build Phase 1: Pi agentLoop runs in-process.
 
 Not priority:
-
-
-- UI polish
+- memory
 - multi-agent
 - cloud
-- user accounts
-- collaboration
-
-
+- workflow engine
 
 ---
 
-# 10. Success Criteria
+# 11. Success Criteria
 
+Phase 1 success: `npx tsx src/cli/run.ts "create hello.txt"` → file created, events streamed.
 
-Forge Phase 1 is successful when:
+Phase 3 success: Agent creates file without required content, stops, gets "verification failed," fixes it autonomously.
 
+Phase 4 success: Full desktop flow — select project → input goal → watch execution → approve tool call → see verification → review diff → undo.
 
-A user can give a software engineering task.
+Phase 5 success: Kill process mid-task → resume → continues. Type mid-run message → agent picks up.
 
-
-Forge can:
-
-
-1. Understand the repository
-
-2. Create a plan
-
-3. Ask Pi to execute
-
-4. Verify the result
-
-5. Complete only after validation
-
-
-
-The system must work without human manually guiding every step.
-
-
-
+Phase 6 success: Golden tasks all pass with expected metrics.
