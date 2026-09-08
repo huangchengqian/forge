@@ -44,10 +44,12 @@ check "guard policy tests"    "cd $ROOT && node --import tsx --test src/guard/po
 check "approval-hub tests"    "cd $ROOT && node --import tsx --test src/server/approval-hub.test.ts"
 check "undo tests"            "cd $ROOT && node --import tsx --test src/server/undo.test.ts"
 check "config-store tests"   "cd $ROOT && node --import tsx --test src/server/config-store.test.ts"
+check "stuck-detector tests" "cd $ROOT && node --import tsx --test src/guardrails/stuck-detector.test.ts"
 
 echo ""
 echo "--- Integration ---"
 check "skeleton smoke"        "cd $ROOT && npx tsx src/cli/smoke.ts"
+check "guardrails smoke"      "cd $ROOT && npx tsx src/cli/smoke-guardrails.ts"
 
 echo ""
 echo "==== Summary: $PASS/$TOTAL passed, $FAIL failed ===="
