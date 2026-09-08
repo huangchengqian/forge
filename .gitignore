@@ -13,8 +13,14 @@ tmp
 dist
 ts-dist
 .turbo
-# Forge: Pi is a sibling submodule, not part of this repo
-/pi/
+# Forge: Pi runtime is vendored at pi/ (tracked in this repo, evolved directly).
+# Build artifacts and generated data inside pi are still ignored:
+.artifacts/
+dist-chrome/
+dist-firefox/
+pi/packages/ai/src/providers/data/
+pi/packages/ai/src/providers/.model-generation-*/
+*.cpuprofile
 # Forge: generated artifacts and local state
 /src/.forge-cache/
 /coverage/

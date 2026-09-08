@@ -24,15 +24,15 @@ describe("event log append ordering", () => {
 
     // Fire-and-forget, exactly like task-manager's onPiEvent.
     for (const [i, payload] of payloads.entries()) {
-      void appendEvent(taskId, "AGENT_EVENT", payload);
+      void appendEvent(taskId, "TEXT_DELTA", payload);
       if (i % 20 === 19) await new Promise((r) => setTimeout(r, 0));
     }
 
     // Wait for the queue to drain.
-    await appendEvent(taskId, "TASK_COMPLETED", {});
+    await appendEvent(taskId, "SESSION_ENDED", {});
 
     const events = await readEvents(taskId);
-    const deltas = events.filter((e) => e.type === "AGENT_EVENT");
+    const deltas = events.filter((e) => e.type === "TEXT_DELTA");
     assert.equal(deltas.length, 120);
 
     for (const [i, e] of deltas.entries()) {
@@ -42,7 +42,7 @@ describe("event log append ordering", () => {
     }
 
     // Completed marker lands last.
-    assert.equal(events[events.length - 1]?.type, "TASK_COMPLETED");
+    assert.equal(events[events.length - 1]?.type, "SESSION_ENDED");
   });
 
   test("awaited append resolves after its own line is durable", async () => {
@@ -50,10 +50,10 @@ describe("event log append ordering", () => {
     process.env.FORGE_EVENTS_DIR = dir;
     const taskId = "await-test";
 
-    const event = await appendEvent(taskId, "TASK_CREATED", { goal: "g" });
+    const event = await appendEvent(taskId, "SESSION_CREATED", { goal: "g" });
     const events = await readEvents(taskId);
     assert.equal(events.length, 1);
     assert.equal(events[0]?.id, event.id);
-    assert.equal(events[0]?.type, "TASK_CREATED");
+    assert.equal(events[0]?.type, "SESSION_CREATED");
   });
 });

@@ -2,79 +2,25 @@ import { spawn } from "node:child_process";
 import type { EvaluationInput } from "./evaluator.ts";
 import type { EvaluationResult, Finding, Evidence } from "../core/types/evaluation.ts";
 
+/**
+ * Deterministic post-completion scoring for the Session model. Plan/step
+ * coverage checks from the state-machine era are gone (there is no plan);
+ * what remains is what a Session can honestly answer for: turn/size sanity
+ * and change-scope guardrails on the real git diff.
+ */
 export class DeterministicEvaluator {
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     const findings: Finding[] = [];
     const evidence: Evidence[] = [];
-    const { task, plan, observations } = input;
+    const { session } = input;
 
-    const steps = plan?.steps ?? [];
-    const verified = steps.filter((s) => s.status === "verified");
-
+    const turns = session.messages.filter((m) => m.role === "assistant").length;
     evidence.push({
-      kind: "plan_coverage",
-      detail: `${verified.length}/${steps.length} steps verified`,
+      kind: "conversation_size",
+      detail: `${session.messages.length} message(s), ${turns} assistant turn(s)`,
     });
-    if (steps.length === 0) {
-      findings.push({ rule: "plan_coverage", severity: "critical", message: "plan missing or empty" });
-    } else if (verified.length !== steps.length) {
-      findings.push({
-        rule: "plan_coverage",
-        severity: "critical",
-        message: `${steps.length - verified.length} step(s) not verified`,
-      });
-    }
 
-    const totalCriteria = steps.reduce((n, s) => n + s.successCriteria.length, 0);
-    evidence.push({
-      kind: "verification_coverage",
-      detail: `${totalCriteria} criteria across ${steps.length} steps; ${observations.length} observation(s)`,
-    });
-    if (totalCriteria === 0) {
-      findings.push({
-        rule: "verification_coverage",
-        severity: "critical",
-        message: "no success criteria defined in plan",
-      });
-    }
-    if (observations.length < steps.length && steps.length > 0) {
-      findings.push({
-        rule: "verification_coverage",
-        severity: "warning",
-        message: `fewer observations (${observations.length}) than steps (${steps.length})`,
-      });
-    }
-
-    let maxAttempts = 0;
-    for (const s of steps) {
-      if (s.attempts > maxAttempts) maxAttempts = s.attempts;
-    }
-    evidence.push({
-      kind: "retry_quality",
-      detail: `max step attempts=${maxAttempts}, task fixes=${task.fixCount}`,
-    });
-    if (maxAttempts >= 5) {
-      findings.push({
-        rule: "retry_quality",
-        severity: "critical",
-        message: `a step required ${maxAttempts} attempts`,
-      });
-    } else if (maxAttempts >= 3) {
-      findings.push({
-        rule: "retry_quality",
-        severity: "warning",
-        message: `a step required ${maxAttempts} attempts (repeated failures)`,
-      });
-    }
-    if (task.fixCount >= 5) {
-      findings.push({
-        rule: "retry_quality",
-        severity: "warning",
-        message: `${task.fixCount} fix cycles consumed`,
-      });
-    }
-
-    const diff = await gitDiffSummary(task.directory);
+    const diff = await gitDiffSummary(session.workspace);
     evidence.push({ kind: "change_scope", detail: diff.detail });
     if (diff.changedLines > 20_000) {
       findings.push({
@@ -99,7 +45,7 @@ export class DeterministicEvaluator {
     const status = hasCritical ? "REVIEW_REQUIRED" : findings.length > 0 ? "WARNING" : "PASS";
 
     return {
-      taskId: task.id,
+      taskId: session.id,
       score,
       status,
       findings,
