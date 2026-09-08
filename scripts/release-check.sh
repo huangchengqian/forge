@@ -29,6 +29,13 @@ check "bench typecheck"       "cd $ROOT && npx tsc --noEmit -p tsconfig.benchmar
 check "desktop typecheck"     "cd $ROOT/desktop && npx tsc --noEmit"
 
 echo ""
+echo "--- Repo Integrity ---"
+# The Pi runtime must stay git-tracked. It was once silently excluded by
+# .gitignore while AGENTS.md/README claimed it was vendored — external
+# reviewers saw a repo without Pi. This gate makes that impossible again.
+check "vendored pi integrity" "cd $ROOT && git ls-files pi/ | grep -q '^pi/packages/agent/package.json$' && git ls-files pi/ | grep -q '^pi/packages/ai/package.json$' && git ls-files pi/ | grep -q '^pi/packages/coding-agent/package.json$'"
+
+echo ""
 echo "--- Unit Tests ---"
 check "verification tests"    "cd $ROOT && node --import tsx --test src/verification/verify.test.ts"
 check "command policy tests"  "cd $ROOT && node --import tsx --test src/verification/command-policy.test.ts"
