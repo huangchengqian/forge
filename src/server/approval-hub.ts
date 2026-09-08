@@ -1,10 +1,11 @@
 /**
- * ApprovalHub — in-memory registry of pending guard approvals (9.6.5).
+ * ApprovalHub — in-memory registry of guard approvals.
  *
- * The guard extension (inside the Pi subprocess) emits extension_ui_request
- * events on `ask` decisions. PiRuntime surfaces them here via its approval
- * listener; the HTTP layer lists them for the Desktop and resolves them by
- * calling back into the runtime.
+ * The guard pipeline (beforeToolCall hook) hits an `ask` decision for bash /
+ * network / git calls. The hook blocks on `request()`; the Desktop resolves
+ * it via the HTTP approve/deny endpoints which call `mark()`. A hard timeout
+ * converts an unanswered dialog into a denial — an agent must never hang
+ * forever on an unattended dialog.
  */
 
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
@@ -19,9 +20,12 @@ export type ApprovalRecord = {
   status: ApprovalStatus;
 };
 
+type Waiter = (approved: boolean) => void;
+
 export class ApprovalHub {
   private readonly records = new Map<string, ApprovalRecord>();
   private readonly byTask = new Map<string, Set<string>>();
+  private readonly waiters = new Map<string, Waiter>();
 
   record(input: { requestId: string; taskId: string; method: string; title: string; message: string; at: number }): void {
     this.records.set(input.requestId, { ...input, status: "pending" });
@@ -48,6 +52,50 @@ export class ApprovalHub {
     const rec = this.records.get(requestId);
     if (!rec) return false;
     this.records.set(requestId, { ...rec, status });
+    const waiter = this.waiters.get(requestId);
+    if (waiter) {
+      this.waiters.delete(requestId);
+      waiter(status === "approved");
+    }
     return true;
+  }
+
+  /**
+   * Blocking approval request used by the guardrail hook. Registers a pending
+   * record and resolves when mark() lands (approved/denied) or on timeout
+   * (counts as denied — never hang on an unattended dialog).
+   */
+  request(input: {
+    requestId: string;
+    taskId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+    timeoutMs?: number;
+  }): Promise<boolean> {
+    const timeoutMs = input.timeoutMs ?? 5 * 60_000;
+    this.record({
+      requestId: input.requestId,
+      taskId: input.taskId,
+      method: "tool_call",
+      title: `Allow ${input.toolName}?`,
+      message: JSON.stringify(input.input).slice(0, 500),
+      at: Date.now(),
+    });
+
+    return new Promise<boolean>((resolveP) => {
+      const settle = (approved: boolean) => {
+        clearTimeout(timer);
+        resolveP(approved);
+      };
+      const waiter: Waiter = settle;
+      this.waiters.set(input.requestId, waiter);
+      const timer = setTimeout(() => {
+        if (this.waiters.get(input.requestId) === waiter) {
+          this.waiters.delete(input.requestId);
+          this.mark(input.requestId, "expired");
+          resolveP(false);
+        }
+      }, timeoutMs);
+    });
   }
 }

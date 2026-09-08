@@ -9,6 +9,10 @@ import type { Model } from "@earendil-works/pi-ai";
 import { createCodingTools } from "@earendil-works/pi-coding-agent";
 import { appendEvent } from "./core/persistence/event-log.ts";
 import { mapAgentEventToPersisted } from "./events/mapper.ts";
+import { makeBeforeToolCall } from "./guardrails/before-tool-call.ts";
+import { makeAfterToolCall } from "./guardrails/after-tool-call.ts";
+import { makeTransformContext } from "./guardrails/transform-context.ts";
+import type { GuardrailConfig } from "./guardrails/types.ts";
 import type { Session } from "./types.ts";
 
 function defaultConvertToLlm(messages: AgentMessage[]): AgentMessage[] {
@@ -29,20 +33,22 @@ function buildSystemPrompt(session: Session): string {
 }
 
 /**
- * Phase 1 entry point: assemble Pi's AgentLoopConfig and run the loop,
- * persisting every event into the FIFO event log. Guardrail hooks
- * (beforeToolCall / afterToolCall / shouldStopAfterTurn / transformContext)
- * are Phase 2-3 additions — this skeleton only wires convertToLlm.
+ * Run Pi's agentLoop in-process with Forge guardrails injected as hooks.
+ * Every event is consumed: mapped into the FIFO event log (persistence +
+ * SSE source of truth), optionally streamed to the caller, and usage is fed
+ * into the cost guard.
  */
 export async function runAgent(opts: {
   session: Session;
   model: Model<any>;
+  guardrails?: GuardrailConfig;
   signal?: AbortSignal;
-  /** LLM streaming function. Required — Pi has no implicit default. */
+  /** LLM streaming function: Pi's streamSimple wrapped with the subscription key,
+   *  or a scripted mock in smoke tests. */
   streamFn: Parameters<typeof agentLoop>[4];
   onEvent?: (event: AgentEvent) => void;
 }): Promise<Session> {
-  const { session, model, signal, streamFn, onEvent } = opts;
+  const { session, model, guardrails, signal, streamFn, onEvent } = opts;
 
   const tools = createCodingTools(session.workspace) ?? [];
   const context: AgentContext = {
@@ -54,7 +60,14 @@ export async function runAgent(opts: {
   const config: AgentLoopConfig = {
     model,
     convertToLlm: defaultConvertToLlm as AgentLoopConfig["convertToLlm"],
+    transformContext: makeTransformContext(),
   };
+
+  if (guardrails) {
+    config.beforeToolCall = makeBeforeToolCall(guardrails);
+    config.afterToolCall = makeAfterToolCall(guardrails);
+    config.getSteeringMessages = async () => guardrails.steeringQueue.splice(0);
+  }
 
   const prompts: AgentMessage[] = [
     { role: "user", content: [{ type: "text", text: session.goal }], timestamp: Date.now() },
@@ -67,6 +80,19 @@ export async function runAgent(opts: {
     const mapped = mapAgentEventToPersisted(event);
     if (mapped) {
       await appendEvent(session.id, mapped.type, mapped.payload);
+    }
+    // Cost tracking from assistant usage (authoritative per-message totals).
+    if (event.type === "message_end" && guardrails) {
+      const message = event.message as { role?: string; usage?: unknown };
+      if (message.role === "assistant" && message.usage) {
+        guardrails.costGuard.trackUsage(
+          message.usage as Parameters<typeof guardrails.costGuard.trackUsage>[0],
+        );
+        await appendEvent(session.id, "COST_UPDATE", {
+          spent: guardrails.costGuard.getSpent(),
+          budget: guardrails.costGuard.getRemaining(),
+        });
+      }
     }
   }
 
