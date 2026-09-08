@@ -33,7 +33,7 @@ echo "--- Repo Integrity ---"
 # The Pi runtime must stay git-tracked. It was once silently excluded by
 # .gitignore while AGENTS.md/README claimed it was vendored — external
 # reviewers saw a repo without Pi. This gate makes that impossible again.
-check "vendored pi integrity" "cd $ROOT && git ls-files pi/ | grep -q '^pi/packages/agent/package.json$' && git ls-files pi/ | grep -q '^pi/packages/ai/package.json$' && git ls-files pi/ | grep -q '^pi/packages/coding-agent/package.json$'"
+check "vendored pi integrity" "cd $ROOT && git ls-files --error-unmatch pi/packages/agent/package.json >/dev/null && git ls-files --error-unmatch pi/packages/ai/package.json >/dev/null && git ls-files --error-unmatch pi/packages/coding-agent/package.json >/dev/null"
 
 echo ""
 echo "--- Unit Tests ---"
