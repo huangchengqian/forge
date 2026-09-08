@@ -9,22 +9,27 @@ export function eventsDir(): string {
 }
 
 export type PersistedEventType =
-  | "TASK_CREATED"
-  | "STATE_CHANGED"
-  | "STEP_STARTED"
-  | "OBSERVATION_CREATED"
-  | "FIX_STARTED"
-  | "PLAN_CREATED"
-  | "STEP_ADDED"
-  | "STEP_UPDATED"
-  | "PLAN_REVISED"
-  | "EVALUATION_STARTED"
-  | "EVALUATION_COMPLETED"
-  | "TASK_COMPLETED"
-  | "TASK_FAILED"
-  | "TASK_CANCELLED"
-  | "MEMORY_USED"
-  | "AGENT_EVENT";
+  // lifecycle
+  | "SESSION_CREATED"
+  | "SESSION_STARTED"
+  | "SESSION_ENDED"
+  | "SESSION_FAILED"
+  | "SESSION_CANCELLED"
+  // agent loop
+  | "TURN_STARTED"
+  | "TURN_ENDED"
+  | "MESSAGE_STARTED"
+  | "MESSAGE_UPDATED"
+  | "MESSAGE_ENDED"
+  | "TEXT_DELTA"
+  | "TOOL_CALL"
+  | "TOOL_UPDATE"
+  | "TOOL_RESULT"
+  // guardrails (Phase 3+; reserved so event types cover everything the UI renders)
+  | "STEERING_QUEUED"
+  | "VERIFICATION_RESULT"
+  | "COST_UPDATE"
+  | "STUCK_WARNING";
 
 export type PersistedEvent = {
   id: string;
