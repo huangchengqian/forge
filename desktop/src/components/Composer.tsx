@@ -46,12 +46,15 @@ export function Composer({ projectId }: { projectId?: string | null }) {
       <div className="composer-box">
         <textarea
           className="composer-ta"
-          placeholder="Describe the engineering task…  (e.g. create hello.ts exporting a hello function)"
+          placeholder="Describe the engineering task…  (Enter to start · Shift+Enter for a new line)"
           value={goal}
           rows={3}
           onChange={(e) => setGoal(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
           }}
         />
         <div className="composer-actions" style={{ justifyContent: "space-between" }}>
@@ -77,7 +80,7 @@ export function Composer({ projectId }: { projectId?: string | null }) {
             )}
           </div>
           <button className="btn btn-primary" onClick={submit} disabled={!goal.trim() || loading}>
-            {loading ? "Starting…" : "Create  (⌘↵)"}
+            {loading ? "Starting…" : "Create  (↵)"}
           </button>
         </div>
       </div>

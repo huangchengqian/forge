@@ -45,44 +45,34 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
 
   return (
     <div className="sidebar">
-      <div className="sidebar-logo">Forge</div>
+      {/* macOS traffic lights overlay this strip — keep it clear of content. */}
+      <div className="sidebar-drag" />
 
-      <div style={{ position: "relative", marginBottom: 6 }}>
-        <select
-          className="input"
-          style={{ width: "100%", boxSizing: "border-box", cursor: "pointer" }}
-          value={activeProject ?? ""}
-          onChange={(e) => void onSwitchProject(e.target.value)}
+      <div className="side-section-label">Project</div>
+      <select
+        className="side-trigger"
+        value={activeProject ?? ""}
+        onChange={(e) => void onSwitchProject(e.target.value)}
+        style={{ marginBottom: 10 }}
+      >
+        {projects.length === 0 && <option value="">No project</option>}
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>{p.name}</option>
+        ))}
+      </select>
+
+      <div className="side-header-row">
+        <div className="side-section-label">Sessions</div>
+        <button
+          className="side-add-btn"
+          onClick={onNewSession}
+          title="New session"
         >
-          {projects.length === 0 && <option value="">No project</option>}
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+          +
+        </button>
       </div>
 
-      <button className="sidebar-row-btn" onClick={onNewSession}>+ New Session</button>
-      <button
-        className="sidebar-row-btn"
-        onClick={() => openSettings(true)}
-        style={{ display: "flex", justifyContent: "space-between" }}
-      >
-        <span>⚙ Settings</span>
-        <span
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleTheme();
-          }}
-          title="Toggle theme"
-        >
-          {theme === "dark" ? "☀" : "☾"}
-        </span>
-      </button>
-
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", marginTop: 8 }}>
-        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", padding: "4px 8px", letterSpacing: "0.5px" }}>
-          SESSIONS
-        </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 8 }}>
         {sessions.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "4px 8px" }}>
             No sessions yet
@@ -96,12 +86,25 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
           >
             <span className="title" title={s.goal}>{s.goal || "(untitled)"}</span>
             <span
-              className="dot"
-              style={{ width: 7, height: 7, borderRadius: 99, background: statusColor[s.status], flexShrink: 0 }}
+              className="state-dot"
+              style={{ background: statusColor[s.status] }}
               title={statusLabel[s.status]}
             />
           </div>
         ))}
+      </div>
+
+      <div className="side-bottom">
+        <button className="side-bottom-btn" onClick={() => openSettings(true)}>
+          <span>⚙ Settings</span>
+        </button>
+        <button
+          className="side-bottom-btn side-icon-btn"
+          onClick={toggleTheme}
+          title="Toggle theme"
+        >
+          {theme === "dark" ? "☀" : "☾"}
+        </button>
       </div>
     </div>
   );

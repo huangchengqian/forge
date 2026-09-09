@@ -58,7 +58,10 @@ export function App() {
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <Sidebar onNewSession={() => store.getState().select(null)} />
-      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+      <main
+        className="app-main"
+        style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}
+      >
         {activeSession ? (
           <SessionView
             key={activeSession.id}
