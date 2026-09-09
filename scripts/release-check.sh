@@ -51,6 +51,7 @@ echo "--- Integration ---"
 check "skeleton smoke"        "cd $ROOT && npx tsx src/cli/smoke.ts"
 check "guardrails smoke"      "cd $ROOT && npx tsx src/cli/smoke-guardrails.ts"
 check "verify-loop smoke"     "cd $ROOT && npx tsx src/cli/smoke-verification.ts"
+check "server smoke"          "cd $ROOT && npx tsx src/cli/smoke-server.ts"
 
 echo ""
 echo "==== Summary: $PASS/$TOTAL passed, $FAIL failed ===="

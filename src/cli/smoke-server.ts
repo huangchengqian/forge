@@ -1,0 +1,130 @@
+/**
+ * Phase 4 server smoke: boots the real session-centric server in-process and
+ * exercises the HTTP surface end-to-end (config, projects, session create,
+ * SSE stream, abort, delete) with a fake subscription — no network calls are
+ * awaited (the background agent fails against the fake key and is aborted).
+ */
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startForgeServer, type ForgeServerHandle } from "../server/http-server.ts";
+import { saveForgeConfig } from "../server/config-store.ts";
+import { saveSession } from "../core/persistence/session-store.ts";
+
+async function main(): Promise<void> {
+  const forgeHome = mkdtempSync(join(tmpdir(), "forge-server-smoke-"));
+  process.env.FORGE_HOME = forgeHome;
+  process.env.FORGE_EVENTS_DIR = join(forgeHome, "events");
+  process.env.FORGE_SESSIONS_DIR = join(forgeHome, "sessions");
+
+  // A fake subscription: the background agent will fail against it, which is
+  // part of what we verify (failure path + abort + delete).
+  await saveForgeConfig(forgeHome, {
+    version: 1,
+    providers: [
+      {
+        id: "prov_fake",
+        api: "openai-completions",
+        modelId: "fake-model",
+        baseUrl: "http://127.0.0.1:9/v1",
+        apiKey: "fake-key",
+      },
+    ],
+    defaultProviderId: "prov_fake",
+    maxConcurrency: 1,
+  } as unknown as Parameters<typeof saveForgeConfig>[1]);
+
+  const handle: ForgeServerHandle = await startForgeServer({
+    port: 0,
+    host: "127.0.0.1",
+    forgeHome,
+  });
+  const auth = { authorization: `Bearer ${handle.token}` };
+  const base = handle.url;
+  let ok = true;
+
+  try {
+    // 1. Config round-trip.
+    const cfg = (await (await fetch(`${base}/config`, { headers: auth })).json()) as { providers: unknown[] };
+    console.log(`  config providers: ${(cfg.providers as unknown[]).length}`);
+    ok = ok && Array.isArray(cfg.providers) && cfg.providers.length === 1;
+
+    // 2. Project registration.
+    const proj = (await (
+      await fetch(`${base}/projects`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ path: forgeHome }),
+      })
+    ).json()) as { id: string; path: string };
+    console.log(`  project: ${proj.id} path=${proj.path}`);
+    ok = ok && typeof proj.id === "string";
+
+    // 3. Create a session (202) — the agent fails fast against :9 and is aborted.
+    const created = (await (
+      await fetch(`${base}/sessions`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ goal: "smoke session", trustLevel: "low" }),
+      })
+    ).json()) as { sessionId: string };
+    const sessionId = created.sessionId as string;
+    console.log(`  session created: ${sessionId}`);
+    ok = ok && typeof sessionId === "string";
+
+    // 4. Session readable.
+    const session = (await (await fetch(`${base}/sessions/${sessionId}`, { headers: auth })).json()) as { status: string; goal: string };
+    console.log(`  session status: ${session.status}, goal: ${session.goal}`);
+    ok = ok && session.goal === "smoke session";
+
+    // 5. SSE stream yields at least the created/started events.
+    const controller = new AbortController();
+    const sse = await fetch(`${base}/sessions/${sessionId}/stream?token=${encodeURIComponent(handle.token)}`, {
+      signal: controller.signal,
+      headers: auth,
+    });
+    const reader = sse.body?.getReader();
+    let sseFrames = 0;
+    if (reader) {
+      const timer = setTimeout(() => controller.abort(), 1500);
+      try {
+        while (sseFrames < 2) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseFrames += Array.from(new TextDecoder().decode(value).matchAll(/data: /g)).length;
+          if (sseFrames >= 2) break;
+        }
+      } catch {
+        /* aborted */
+      }
+      clearTimeout(timer);
+      controller.abort();
+    }
+    console.log(`  sse frames: ${sseFrames}`);
+    ok = ok && sseFrames >= 2;
+
+    // 6. Approvals endpoint (empty) + abort + delete.
+    const approvals = (await (await fetch(`${base}/sessions/${sessionId}/approvals`, { headers: auth })).json()) as { approvals: unknown[] };
+    await fetch(`${base}/sessions/${sessionId}/abort`, { method: "POST", headers: auth });
+    await new Promise((r) => setTimeout(r, 300));
+    const deleted = await fetch(`${base}/sessions/${sessionId}`, { method: "DELETE", headers: auth });
+    console.log(`  approvals: ${(approvals.approvals as unknown[]).length}, delete: ${deleted.status}`);
+    ok = ok && deleted.status === 200;
+
+    // Cleanup: the session file must be gone.
+    rmSync(join(forgeHome, "sessions", `${sessionId}.json`), { force: true });
+    void saveSession; // referenced only to keep the import honest
+  } finally {
+    await handle.close();
+    rmSync(forgeHome, { recursive: true, force: true });
+  }
+
+  writeFileSync(join(tmpdir(), "forge-server-smoke-last"), ok ? "PASS" : "FAIL");
+  console.log(`\nSERVER SMOKE: ${ok ? "PASS" : "FAIL"}`);
+  if (!ok) process.exitCode = 1;
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
