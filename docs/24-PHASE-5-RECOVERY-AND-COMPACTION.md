@@ -1,6 +1,8 @@
 # Phase 5 — Recovery + Compaction + Steering
 
-> 状态: **范围已定,决策待拍**。本文件记录 Phase 5 边界、当前代码现状、以及动工前需要 PM 拍板的设计决策。
+> 状态: **范围已定,决策已拍**。本文件记录 Phase 5 边界、当前代码现状、PM 拍板的设计决策,以及动工前需要进一步收敛的边界 case。
+
+> 决策记录见 [§7](#7-决策记录)。
 
 ---
 
@@ -64,6 +66,12 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 
 **风险**:若 SESSION 跑了一半 LLM 在 stream 工具结果时被 abort,某些 toolResult 可能不完整 — 需要在 replay 时校验 message_end 配对,缺尾的丢弃。
 
+**PM 拍板**:选项 A,补充边界 case — Resume 时允许**可选的 steering message**:
+- `POST /sessions/:id/resume` body 可选字段 `message?: string`
+- 如果有,注入 `steeringQueue`(同 `steer` 接口的语义),agent 续跑后第一件事就是处理这条
+- 如果没有,纯续跑
+- 典型场景:"接着跑,顺便把测试也修了" — 用户不需要 abort 再 resume+steer 两步
+
 ---
 
 ### 决策 D2:可 Resume 的 Session 状态白名单
@@ -85,6 +93,8 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 
 **待 PM 确认**:是否包含 `cancelled`?我倾向包含 — 用户主动中止就是想"先停,稍后接着",最常见的 resume 场景。
 
+**PM 拍板**:选项 A,`failed` + `cancelled` 都在内。`completed` 暂不做。
+
 ---
 
 ### 决策 D3:压缩触发策略
@@ -93,7 +103,7 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 
 | 选项 | 触发条件 | 数据来源 |
 |---|---|---|
-| **A. 按真实 token 数自动**(推荐) | 累计 usage.inputTokens 超过阈值(默认 100K) | 复用 `CostGuard.trackUsage` 已落盘的 usage |
+| **A. 按真实 token 数自动**(推荐) | 每次 turn 末检查**最后一轮** `usage.inputTokens` 超过阈值(默认 120K) | `CostGuard` 已在 `message_end` 收集 usage,取最近一次即可 |
 | B. 按 turn 数 | assistant turn > N 触发 | 简单但粗 — 不区分长 turn / 短 turn |
 | C. 手动 | Settings 给用户开关 | 用户控制感强但暴露了不该暴露的旋钮 |
 
@@ -102,42 +112,102 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 - 不需要新依赖
 - 阈值可以放 ForgeConfig,未来给高级用户调
 
+**⚠️ 自我更正(Anvil 反思)**:初稿写的是"累计 usage.inputTokens 超过阈值",**这是错的**。累计会把各 turn 重复算进去,但 context window 占用看的是当前轮 LLM 看到的 context 大小,**不是历史总和**。
+
+正确做法:
+- 取**最后一次** `message_end` 的 `usage.inputTokens`(provider 报的实际 context 大小)
+- `CostGuard` 已有 `trackUsage()`,加 `getLastInputTokens()` 直接读最新一条
+- 阈值默认 **120K**(200K context window 的 60%)— Pi 的 compaction 需要预留空间生成摘要,60% 留出余量是安全的
+
 **待 PM 确认**:
 - 阈值默认多少?(我建议 100K input tokens,匹配主流模型 context window 的 60-80%)
 - 是否需要硬上限?超过某个值强制截断而不是只压缩(防止 OOM / 极端长 turn)
+
+**PM 拍板**:选项 A + 取最后一轮 `inputTokens` + 默认 120K 阈值。硬上限本次不做(留未来)。
 
 ---
 
 ## 4. 决策敲定后的实现计划
 
-> 此节是 D1/D2/D3 全部敲定后才走的实施路线,先不展开。
+### 4.1 Recovery 核心
 
-**预计工序**:
+**`src/core/persistence/replay.ts`**(新文件)
+- `replaySession(id): Promise<AgentMessage[]>`
+- **只** 从 `MESSAGE_STARTED` / `MESSAGE_ENDED` 事件对重建 `AgentMessage[]`
+- **忽略**其他事件类型:`STUCK_WARNING` / `COST_UPDATE` / `GUARD_BLOCKED` / `VERIFICATION_RESULT` / `STEERING_QUEUED` / `SESSION_*` 都是审计/状态用,**不是 messages 的事实来源**
+- 配对校验:`message_end` 之前必须有 `message_start` 匹配(同 `messageId`),缺尾的丢弃并发 `REPLAY_REPAIRED` 事件
 
-1. **Recovery 核心**(`src/server/session-manager.ts` + `src/core/persistence/`)
-   - `replaySession(id)`: 从 event-log 重放 message_start / message_end 配对,组装 `AgentMessage[]`
-   - `sessionManager.resume(id)`: 校验 status 在白名单 → 调 `runAgent({ session, messages: replayed })`
-   - 删除或重写 `runtime-supervisor.ts`(本次顺手清掉旧 task-* 残留)
+**`src/server/session-manager.ts`**
+- 新增 `resume(id, opts?: { message?: string }): Promise<{ sessionId: string }>`
+- 校验 `status ∈ {failed, cancelled}` — 不在白名单返回 409
+- 校验 `id` 不在 `this.active` 中(防止双写) — 命中返回 409
+- 调 `replaySession(id)` 拿到 messages → 加载 session(读取 `cost.total` 用于 CostGuard 续算) → 启动 `runAgent`
+- 如果 `opts.message`,注入 `steeringQueue`(同 `steer` 接口语义)
 
-2. **Compaction 接入**(`src/agent-runner.ts` + `src/guardrails/`)
-   - 把 `transform-context.ts` 的 LastN 兜底保留(作为压缩失败时的安全网)
-   - `prepareNextTurn` 钩子:每 turn 末检查累计 inputTokens → 触发 `Pi.prepareCompaction`
-   - 发 `COMPACTION` 事件,SessionView 显示 "Compacting history…"
+**`src/guardrails/cost-guard.ts`**(扩展)
+- 现有 `trackUsage()` 已有,加 `getLastInputTokens(): number | null` 读最新一次
+- `resume` 时 `CostGuard` 实例化要从 session 落盘的 `cost.total` 续算,不能从 0 开始 — 否则 UI 看到的花费突然归零
 
-3. **Resume UI**(`desktop/src/components/SessionView.tsx`)
-   - SessionView header 加 "Resume" 按钮(条件渲染:status in 白名单)
-   - 调 `POST /sessions/:id/resume`,成功后切到 running 状态
+**`src/server/runtime-supervisor.ts`**(删除)
+- PM 拍板删除。Recovery 由 `sessionManager.resume()` 负责,不需要独立的 supervisor。
+- 旧代码是 task-centric 命名,改造成 session-centric 等于重写,价值 < 删除。
+- 同时清理 `src/server/` 里其它对 supervisor 的引用(`http-server.ts` 中可能有 `runtimeSupervisor` 字段,grep 后处理)
 
-4. **HTTP 路由**(`src/server/http-server.ts`)
-   - `POST /sessions/:id/resume` → `sessionManager.resume()`
-   - 401/403/409 错误码(409 = session 仍在 running,不能 resume)
+### 4.2 Compaction 接入
 
-5. **门禁**
-   - 单元:`replaySession.test.ts`(配对校验、缺尾丢弃、顺序正确)
-   - 单元:`compaction-trigger.test.ts`(阈值边界、单测 mock usage)
-   - 冒烟:`smoke-recovery.ts`(创建→abort→resume→续跑)
-   - 冒烟:`smoke-compaction.ts`(注入超长 turn→断言 COMPACTION 事件发出)
-   - 集成:`tests/integration/recovery.test.ts`(端到端)
+**`src/agent-runner.ts`**
+- 把 `transformContext: makeTransformContext()` 改成 `makeTransformContext(guardrails)` — 让 transform 看得到 costGuard
+- `transformContext`:**保留** LastN 兜底(压缩失败时的安全网),逻辑不变
+- **新增** `config.prepareNextTurn = makePrepareNextTurn(guardrails)`,在 `runAgent` 入口注册
+- `prepareNextTurn` 实现:每 turn 末读 `costGuard.getLastInputTokens()` → 超过 120K 阈值 → 调 `Pi.prepareCompaction(entries)` → 发 `COMPACTION` 事件 → 不阻塞 turn 继续
+
+**`src/guardrails/compaction.ts`**(新文件)
+- 薄包装 `Pi.prepareCompaction`,处理 `SessionEntry[]` ↔ `AgentMessage[]` 的转换(Pi 的输入是 entries,我们的是 messages)
+- 失败兜底:压缩失败时打 `COMPACTION_FAILED` 事件,**不**让 LLM 看到损坏的 messages
+
+**`src/guardrails/types.ts`**
+- `GuardrailConfig` 加 `compaction?: { thresholdTokens: number }`(默认 120K)
+- 未来可让用户在 Settings 调
+
+**`src/core/persistence/schema.ts`**
+- `PersistedEventType` 加 `COMPACTION`、`COMPACTION_FAILED`、`REPLAY_REPAIRED`
+
+### 4.3 Resume UI
+
+**`desktop/src/components/SessionView.tsx`**
+- header 右侧加 "Resume" 按钮(条件渲染:`status === 'failed' || status === 'cancelled'`)
+- 点击弹 `ResumeDialog`(复用 ApprovalDialog 风格):可选文本框,placeholder "Optional: e.g. also fix the failing tests"
+- 提交调 `POST /sessions/:id/resume { message? }`,成功后切到 running 状态(由 SSE `session_started` 事件驱动)
+
+**`desktop/src/lib/api.ts`**
+- 加 `resumeSession(id, message?: string): Promise<void>`
+
+**`desktop/src/lib/store.ts`**
+- `Resume` 按钮的 disabled 态:`status` 不在白名单时禁用
+
+### 4.4 HTTP 路由
+
+**`src/server/http-server.ts`**
+- `POST /sessions/:id/resume` body `{ message?: string }` → `sessionManager.resume(id, { message })`
+- 错误码:
+  - `404` = session 不存在
+  - `409` = session 状态不允许 resume(`running` / `completed`)
+  - `500` = replay 失败
+
+### 4.5 门禁
+
+- **单元** `src/core/persistence/replay.test.ts`:配对校验、缺尾丢弃、护栏事件忽略、顺序正确
+- **单元** `src/guardrails/compaction.test.ts`:阈值边界、单测 mock `getLastInputTokens`
+- **单元** `src/guardrails/cost-guard.test.ts`:`getLastInputTokens` 返回最新一次
+- **冒烟** `src/cli/smoke-recovery.ts`:创建 session → abort → resume → 验证 messages 恢复 + cost 续算
+- **冒烟** `src/cli/smoke-compaction.ts`:注入超长 turn → 断言 `COMPACTION` 事件发出 + messages 缩短
+- **冒烟** `src/cli/smoke-resume-with-steering.ts`:创建 session → 失败 → resume 带 message → 验证 message 注入 steeringQueue
+- **集成** `tests/integration/recovery.test.ts`:端到端 resume + compaction + 状态机正确切换
+
+### 4.6 release-check.sh 更新
+
+- 把 `smoke-recovery.ts` / `smoke-compaction.ts` / `smoke-resume-with-steering.ts` 加进冒烟序列
+- 确认门禁无回归(Phase 1-4 冒烟仍全绿)
 
 ---
 
@@ -145,11 +215,11 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 
 | 区块 | 代码量(含测试) | 节奏 |
 |---|---|---|
-| Recovery | 400-600 行 | 1 天 |
-| Compaction | 200-400 行 | 0.5-1 天 |
-| Resume UI + 路由 | 150-250 行 | 0.5 天 |
+| Recovery(replay + resume + CostGuard 续算 + 删 supervisor) | 500-700 行 | 1.5 天 |
+| Compaction(prepareNextTurn + 转换层 + 兜底) | 250-400 行 | 0.5-1 天 |
+| Resume UI + 路由 + dialog | 200-300 行 | 0.5 天 |
 | 门禁(单测 + 冒烟 + 集成) | 含在上面 | 0.5 天 |
-| **合计** | **800-1250 行** | **2-3 天** |
+| **合计** | **950-1400 行** | **2.5-3.5 天** |
 
 不含真机验收(PM 拿 API key 跑端到端)。
 
@@ -157,17 +227,27 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 
 ## 6. 风险与未决议题
 
-- **Replay 一致性**:`event-log` 顺序由 FIFO 队列保证,但若历史上某条 message_end 之前已有 tool_use 没闭合,replay 时怎么处理?需要给 `replaySession` 加自检并把脏数据降级(丢弃尾部 block,标注 `REPLAY_REPAIRED` 事件)
+- **Replay 一致性**:`event-log` 顺序由 FIFO 队列保证,但若历史上某条 message_end 之前已有 tool_use 没闭合,replay 时怎么处理?已定:**丢弃尾部 block,发 `REPLAY_REPAIRED` 事件**(`§4.1`)
 - **压缩后 steer 行为**:`prepareNextTurn` 跑在 turn 边界,steering 消息正好在此刻到达,会被 LLM 当成新 turn 还是并入原 turn?需要跑 Pi 自己的 compaction test 套验证
-- **Resume 后的 cost 累计**:CostGuard 是 per-session 实例化的,resume 时需要从落盘 cost 续算而不是从 0 开始(否则 UI 看到的花费突然归零)
+- **Resume 后的 cost 累计**:已定:**`CostGuard` 从 session 落盘的 `cost.total` 续算**,不归零(`§4.1`)
 - **空 messages 的 Session**:用户从未发过任何消息的 session 出现在列表里怎么处理?本次不处理(留 TODO)
+- **压缩对 prompt cache 的影响**:PM 提醒:压缩会破坏 prompt cache,Claude Code 用 forked-agent cache sharing 缓解。Forge 本次**不**做 cache 优化,但**必须**发 `COMPACTION` 事件让 UI 显示 "压缩中" — 用户需要知道 LLM 行为可能变了
+- **runtime-supervisor 删除的影响**:PM 拍板删除。需要 grep 全仓确认无其它引用(`http-server.ts` 可能存有 `runtimeSupervisor` 字段),无引用后删除整个文件
 
 ---
 
 ## 7. 决策记录
 
-> 决策敲定后,把 PM 的回答填到这里。
+> PM 决策已敲定,本节记录最终选择与理由。
 
-- [ ] **D1**:Resume 语义 — 选项 ___
-- [ ] **D2**:可 Resume 状态白名单 — 选项 ___
-- [ ] **D3**:压缩触发策略 — 选项 ___(阈值默认 ___)
+- [x] **D1**:Resume 语义 — **A(续上次跑)+ 可选 steering message**
+- [x] **D2**:可 Resume 状态白名单 — **A(`failed` + `cancelled`)**
+- [x] **D3**:压缩触发策略 — **A(按真实 token 数自动)+ 取最后一轮 `inputTokens` + 阈值默认 120K input tokens**
+
+**额外决议**(PM 补充):
+- [x] `replaySession` 只重建 messages,不重建 guardrail 状态(STUCK_WARNING / COST_UPDATE 等是审计用,不是状态重建用)
+- [x] `CostGuard` 从 session 落盘的 `cost.total` 续算,resume 时不归零
+- [x] 触发压缩后必须发 `COMPACTION` 事件,UI 显示 "压缩中"(LLM 行为可能变化,用户需要感知)
+- [x] `src/server/runtime-supervisor.ts` 删除,Recovery 完全由 `sessionManager.resume()` 负责
+
+**Anvil 反思**:初稿 D3 写"累计 usage.inputTokens"是错误的,被 PM 纠正。已在本节记录并改写。后续涉及 provider usage 的设计必须先想清楚"该读当前轮还是历史总和"。
