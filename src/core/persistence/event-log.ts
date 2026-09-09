@@ -20,6 +20,11 @@ export type PersistedEventType =
   | "SESSION_FAILED"
   | "SESSION_CANCELLED"
   // agent loop (data plane — high frequency, not fanned out to the bus)
+  // AGENT_RUN_* is the Pi-run lifecycle (one runAgent call), distinct from
+  // the SESSION_* lifecycle (the session as a whole, owned by SessionManager).
+  // A resumed session legitimately logs SESSION_* once + AGENT_RUN_* per run.
+  | "AGENT_RUN_STARTED"
+  | "AGENT_RUN_ENDED"
   | "TURN_STARTED"
   | "TURN_ENDED"
   | "MESSAGE_STARTED"

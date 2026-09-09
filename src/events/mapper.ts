@@ -11,9 +11,12 @@ export function mapAgentEventToPersisted(
 ): { type: PersistedEventType; payload: Record<string, unknown> } | null {
   switch (event.type) {
     case "agent_start":
-      return { type: "SESSION_STARTED", payload: {} };
+      // Pi-run lifecycle, NOT session lifecycle: a resumed session runs
+      // agent_start more than once while SESSION_* stays single-shot
+      // (SessionManager owns SESSION_* authoritatively).
+      return { type: "AGENT_RUN_STARTED", payload: {} };
     case "agent_end":
-      return { type: "SESSION_ENDED", payload: { messages: event.messages.length } };
+      return { type: "AGENT_RUN_ENDED", payload: { messages: event.messages.length } };
     case "turn_start":
       return { type: "TURN_STARTED", payload: {} };
     case "turn_end":
