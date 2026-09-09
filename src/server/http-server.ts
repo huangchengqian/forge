@@ -6,7 +6,6 @@ import { eventsDir } from "../core/persistence/event-log.ts";
 import { ApprovalHub } from "./approval-hub.ts";
 import { ProjectsRegistry } from "./projects.ts";
 import { SessionManager } from "./session-manager.ts";
-import { RuntimeSupervisor } from "./runtime-supervisor.ts";
 import { computeDiff, restoreUndo } from "./undo.ts";
 import { isAuthorized, newToken, writeHandshake } from "./auth.ts";
 import { loadForgeConfig, saveForgeConfig } from "./config-store.ts";
@@ -28,8 +27,6 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
   const host = opts.host ?? "127.0.0.1";
   const bus = new EventBus();
   void bus.subscribe(() => {}); // keep the bus alive; SSE is log-tailed
-  const supervisor = new RuntimeSupervisor((m) => console.log(`[supervisor] ${m}`));
-  void supervisor;
   const projects = new ProjectsRegistry(opts.forgeHome);
   const approvalHub = new ApprovalHub();
   const manager = new SessionManager({ bus, forgeHome: opts.forgeHome, projects, approvalHub });
@@ -111,6 +108,29 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
       if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "abort") {
         const result = await manager.abort(parts[1]!);
         json(res, result.ok ? 202 : 409, result);
+        return;
+      }
+
+      // POST /sessions/:id/resume — recover a failed/cancelled session.
+      // Optional body: { message?: string } → injected as a user turn +
+      // steering queue entry. Errors:
+      //   404 = session not found
+      //   409 = session status not in {failed, cancelled} OR already active
+      //   500 = replay or subscription lookup failed
+      if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "resume") {
+        const body = await readBody(req);
+        try {
+          const result = await manager.resume(
+            parts[1]!,
+            typeof body.message === "string" ? { message: body.message } : {},
+          );
+          json(res, 202, result);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/not found/i.test(msg)) json(res, 404, { error: msg });
+          else if (/cannot be resumed|already running/i.test(msg)) json(res, 409, { error: msg });
+          else json(res, 500, { error: msg });
+        }
         return;
       }
 

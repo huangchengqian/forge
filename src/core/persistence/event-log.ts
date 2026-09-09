@@ -12,6 +12,7 @@ export type PersistedEventType =
   // lifecycle
   | "SESSION_CREATED"
   | "SESSION_STARTED"
+  | "SESSION_RESUMED"
   | "SESSION_ENDED"
   | "SESSION_FAILED"
   | "SESSION_CANCELLED"
@@ -29,7 +30,10 @@ export type PersistedEventType =
   | "STEERING_QUEUED"
   | "VERIFICATION_RESULT"
   | "COST_UPDATE"
-  | "STUCK_WARNING";
+  | "STUCK_WARNING"
+  // Phase 5: compaction
+  | "COMPACTION"
+  | "COMPACTION_FAILED";
 
 export type PersistedEvent = {
   id: string;

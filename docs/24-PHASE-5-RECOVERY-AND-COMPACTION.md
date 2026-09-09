@@ -36,6 +36,8 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 - `agent-runner.ts:64` 只挂了 `transformContext`,未挂 `prepareNextTurn`(钩子位置空着)
 - `Pi AgentLoopConfig` 已声明 `prepareNextTurn?: (turn: PrepareNextTurnContext, signal?: AbortSignal) => Promise<void>`,见 `pi/packages/agent/src/types.ts:230`
 
+> **实现期修正**:Pi 的 `prepareCompaction(entries, ...)` 输入是 `SessionEntry[]`(带 id 的磁盘格式),Forge 的 `agentLoop` 持有的是 `AgentMessage[]`(无 id,运行时格式)。直接复用需要 fileOps 适配层。本次 Phase 5 只实现 **truncate-mode**(保留最近 N 条,直接丢老的),完整 LLM-summary 模式标记为 Phase 5.x。truncate-mode 仍然发 `COMPACTION` 事件,UI 行为不变。
+
 ### 2.3 UI(0 / 5)
 
 - `desktop/src/` grep `resume|recovery|restart` **零命中**
@@ -132,26 +134,34 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 ### 4.1 Recovery 核心
 
 **`src/core/persistence/replay.ts`**(新文件)
-- `replaySession(id): Promise<AgentMessage[]>`
-- **只** 从 `MESSAGE_STARTED` / `MESSAGE_ENDED` 事件对重建 `AgentMessage[]`
-- **忽略**其他事件类型:`STUCK_WARNING` / `COST_UPDATE` / `GUARD_BLOCKED` / `VERIFICATION_RESULT` / `STEERING_QUEUED` / `SESSION_*` 都是审计/状态用,**不是 messages 的事实来源**
-- 配对校验:`message_end` 之前必须有 `message_start` 匹配(同 `messageId`),缺尾的丢弃并发 `REPLAY_REPAIRED` 事件
+- `replaySession(id): Promise<{ messages: AgentMessage[] }>`
+- **只** 走 `MESSAGE_ENDED` 事件按 append 顺序累加 message(每条就是一个完整的 agent message)
+- **忽略**其他事件类型:`MESSAGE_STARTED` / `STUCK_WARNING` / `COST_UPDATE` / `GUARD_BLOCKED` / `VERIFICATION_RESULT` / `STEERING_QUEUED` / `SESSION_*` 都是审计/状态用,**不是 messages 的事实来源**
+- **不做 id 配对校验** — Pi 的 `AgentMessage`(`UserMessage` / `AssistantMessage` / `ToolResultMessage`)运行时格式**没有 `id` 字段**;id 只在磁盘格式 `SessionEntry` 上存在。所以"缺 message_end 配对 → 丢弃"的方案在 Forge 这层不可行,改为**依赖事件流 append-only + 单写者 FIFO 的不变量**(event-log 的并发模型保证事件不会重复也不会丢)。`MESSAGE_STARTED-without-ENDED` 的"半成品"自然不会产生 `MESSAGE_ENDED` 事件,自动被忽略
 
 **`src/server/session-manager.ts`**
 - 新增 `resume(id, opts?: { message?: string }): Promise<{ sessionId: string }>`
-- 校验 `status ∈ {failed, cancelled}` — 不在白名单返回 409
+- 校验 `status ∈ {failed, cancelled}`(常量 `RESUMABLE_STATUSES`)— 不在白名单返回 409
 - 校验 `id` 不在 `this.active` 中(防止双写) — 命中返回 409
 - 调 `replaySession(id)` 拿到 messages → 加载 session(读取 `cost.total` 用于 CostGuard 续算) → 启动 `runAgent`
 - 如果 `opts.message`,注入 `steeringQueue`(同 `steer` 接口语义)
+- 把 `create` 与 `resume` 共享的"启动 agentLoop"代码抽到 `launchAgent(session, subscription, costGuard, completion)` 私有方法
 
 **`src/guardrails/cost-guard.ts`**(扩展)
-- 现有 `trackUsage()` 已有,加 `getLastInputTokens(): number | null` 读最新一次
-- `resume` 时 `CostGuard` 实例化要从 session 落盘的 `cost.total` 续算,不能从 0 开始 — 否则 UI 看到的花费突然归零
+- 现有 `trackUsage()` 已收 usage,加 `lastInputTokens: number | null` 字段
+- 新增 `getLastInputTokens(): number | null` 读最新一次
+- 新增 `hydrate(spent: number, lastInputTokens?: number | null)` — resume 时从 session 落盘的 `cost.total` 续算,**不**归零
+- **修正**:初稿读 `usage.inputTokens`,实际 Pi 的 `Usage` 类型字段叫 `usage.input`(见 `pi/packages/ai/src/types.ts:75`)。已修正,`trackUsage` 用 `usage.input` 作为权威值
 
 **`src/server/runtime-supervisor.ts`**(删除)
-- PM 拍板删除。Recovery 由 `sessionManager.resume()` 负责,不需要独立的 supervisor。
-- 旧代码是 task-centric 命名,改造成 session-centric 等于重写,价值 < 删除。
-- 同时清理 `src/server/` 里其它对 supervisor 的引用(`http-server.ts` 中可能有 `runtimeSupervisor` 字段,grep 后处理)
+- PM 拍板删除。Recovery 由 `sessionManager.resume()` 负责,不需要独立的 supervisor
+- 旧代码是 task-centric 命名,改造成 session-centric 等于重写,价值 < 删除
+- 同时清理 `src/server/http-server.ts` 中对 `RuntimeSupervisor` 的引用(`new RuntimeSupervisor(...)` 与 import)
+
+**`src/agent-runner.ts`**(关键修正)
+- **Bug fix**:`stream.result()` 实际只返回本次 run 产生的 **delta**(新 messages),不是完整 context。原先 `session.messages = await stream.result()` 会**覆盖掉** replay 注入的上下文,导致 resume 后消息数对不上
+- 改为 `session.messages = [...session.messages, ...newMessages]`(append 语义)
+- 这一处若不修,smoke-recovery 会断言 `messages=5` 但实际拿到 `2`(只有 prompt + assistant-done)
 
 ### 4.2 Compaction 接入
 
@@ -159,18 +169,19 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 - 把 `transformContext: makeTransformContext()` 改成 `makeTransformContext(guardrails)` — 让 transform 看得到 costGuard
 - `transformContext`:**保留** LastN 兜底(压缩失败时的安全网),逻辑不变
 - **新增** `config.prepareNextTurn = makePrepareNextTurn(guardrails)`,在 `runAgent` 入口注册
-- `prepareNextTurn` 实现:每 turn 末读 `costGuard.getLastInputTokens()` → 超过 120K 阈值 → 调 `Pi.prepareCompaction(entries)` → 发 `COMPACTION` 事件 → 不阻塞 turn 继续
+- `prepareNextTurn` 实现:每 turn 末读 `costGuard.getLastInputTokens()` → 超过 120K 阈值 → **truncate-mode**(保留最近 N 条) → 发 `COMPACTION` 事件 → 返回新的 context 给 agentLoop
 
 **`src/guardrails/compaction.ts`**(新文件)
-- 薄包装 `Pi.prepareCompaction`,处理 `SessionEntry[]` ↔ `AgentMessage[]` 的转换(Pi 的输入是 entries,我们的是 messages)
-- 失败兜底:压缩失败时打 `COMPACTION_FAILED` 事件,**不**让 LLM 看到损坏的 messages
+- 实现 `makePrepareNextTurn({ sessionId, costGuard, thresholdTokens?, keepRecentMessages?, emitEvent })`
+- 默认:`thresholdTokens = 120_000`,`keepRecentMessages = 20`
+- 触发条件:`costGuard.getLastInputTokens()! >= thresholdTokens`
+- 触发后:截断 `ctx.context.messages`,保留最后 N 条
+- 发 `COMPACTION` 事件,shape = `{ mode: "truncate", beforeCount, afterCount, droppedCount, beforeTokens, threshold }`
+- 返回 `AgentLoopTurnUpdate`(只覆盖 `context.messages`,`tools` 字段按 `exactOptionalPropertyTypes` 条件拷贝)
+- **完整 LLM-summary 模式** (Pi `prepareCompaction`) 输入是 `SessionEntry[]` + `fileOps` 适配层,Phase 5 不做。Truncate-mode 仍发 `COMPACTION` 事件,UI 提示行为不变
 
-**`src/guardrails/types.ts`**
-- `GuardrailConfig` 加 `compaction?: { thresholdTokens: number }`(默认 120K)
-- 未来可让用户在 Settings 调
-
-**`src/core/persistence/schema.ts`**
-- `PersistedEventType` 加 `COMPACTION`、`COMPACTION_FAILED`、`REPLAY_REPAIRED`
+**`src/core/persistence/event-log.ts`**
+- `PersistedEventType` 加 `SESSION_RESUMED` / `COMPACTION` / `COMPACTION_FAILED`(不开 `REPLAY_REPAIRED` — 见 §4.1)
 
 ### 4.3 Resume UI
 
@@ -196,18 +207,18 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 
 ### 4.5 门禁
 
-- **单元** `src/core/persistence/replay.test.ts`:配对校验、缺尾丢弃、护栏事件忽略、顺序正确
-- **单元** `src/guardrails/compaction.test.ts`:阈值边界、单测 mock `getLastInputTokens`
-- **单元** `src/guardrails/cost-guard.test.ts`:`getLastInputTokens` 返回最新一次
-- **冒烟** `src/cli/smoke-recovery.ts`:创建 session → abort → resume → 验证 messages 恢复 + cost 续算
-- **冒烟** `src/cli/smoke-compaction.ts`:注入超长 turn → 断言 `COMPACTION` 事件发出 + messages 缩短
-- **冒烟** `src/cli/smoke-resume-with-steering.ts`:创建 session → 失败 → resume 带 message → 验证 message 注入 steeringQueue
-- **集成** `tests/integration/recovery.test.ts`:端到端 resume + compaction + 状态机正确切换
+- **单元** `src/core/persistence/replay.test.ts` (7 个 case):空 log、审计事件忽略、append 顺序、`MESSAGE_STARTED-without-ENDED` 自动忽略、`MESSAGE_ENDED` 为权威 source、payload 为空忽略
+- **单元** `src/guardrails/compaction.test.ts` (6 个 case):阈值边界、`keepRecentMessages` 边界、单测 mock `getLastInputTokens`、event shape、`tools` 字段 `exactOptionalPropertyTypes` 处理
+- **单元** `src/guardrails/cost-guard.test.ts` (6 个 case):`getLastInputTokens` 返回最新一次、`hydrate` 不归零、`hydrate(spent, null)` resume-前-without-message-end 场景
+- **冒烟** `src/cli/smoke-recovery.ts`:构造已知 event-log(3 messages + 噪声 + 半成品) → `manager.resume()` → 验证 replay 后 `messages=5`(3+1+1) + cost 续算 + `completed` session 调 resume 报错
+- **冒烟** `src/cli/smoke-compaction.ts`:直接 exercise `makePrepareNextTurn`,验证 truncate 10→3 + COMPACTION 事件 shape + 持久化
+- **集成** `tests/integration/recovery.test.ts` (Phase 5.x):端到端 resume + compaction + 状态机切换 — 本次 Phase 5 **不开**(smoke 已覆盖主路径),留 Phase 5.x
 
 ### 4.6 release-check.sh 更新
 
-- 把 `smoke-recovery.ts` / `smoke-compaction.ts` / `smoke-resume-with-steering.ts` 加进冒烟序列
-- 确认门禁无回归(Phase 1-4 冒烟仍全绿)
+- 新加 unit tests:`replay` / `cost-guard` / `compaction`
+- 新加冒烟:`smoke-recovery` / `smoke-compaction`
+- 确认 Phase 1-4 门禁无回归(原 13 项全绿)
 
 ---
 
@@ -227,12 +238,14 @@ Steering 已在 Phase 2(`db39b9c`)实现,本次只做前两件。
 
 ## 6. 风险与未决议题
 
-- **Replay 一致性**:`event-log` 顺序由 FIFO 队列保证,但若历史上某条 message_end 之前已有 tool_use 没闭合,replay 时怎么处理?已定:**丢弃尾部 block,发 `REPLAY_REPAIRED` 事件**(`§4.1`)
+- **Replay 一致性**:`event-log` 顺序由 FIFO 队列保证。`MESSAGE_STARTED-without-ENDED` 的"半成品"自然不产生 `MESSAGE_ENDED` 事件,replay 时自动忽略。**不**做 id 配对校验(运行时 `AgentMessage` 无 id);信任事件流的 append-only + 单写者 FIFO 不变量(`§4.1`)
+- **agent-runner messages merge**:`stream.result()` 是 delta 不是全量 context,需 `[...prev, ...delta]` 拼接。**已实现 + 验证**(smoke-recovery messages=5) — 但所有调用 `agentLoop` 的路径(create / resume)都共享此约束,未来若加新入口要复用 `launchAgent`(`§4.1`)
 - **压缩后 steer 行为**:`prepareNextTurn` 跑在 turn 边界,steering 消息正好在此刻到达,会被 LLM 当成新 turn 还是并入原 turn?需要跑 Pi 自己的 compaction test 套验证
-- **Resume 后的 cost 累计**:已定:**`CostGuard` 从 session 落盘的 `cost.total` 续算**,不归零(`§4.1`)
+- **Resume 后的 cost 累计**:已定:**`CostGuard` 从 session 落盘的 `cost.total` 续算**,不归零(`§4.1`)— 通过 `costGuard.hydrate(spent, lastInputTokens)` 实现
 - **空 messages 的 Session**:用户从未发过任何消息的 session 出现在列表里怎么处理?本次不处理(留 TODO)
-- **压缩对 prompt cache 的影响**:PM 提醒:压缩会破坏 prompt cache,Claude Code 用 forked-agent cache sharing 缓解。Forge 本次**不**做 cache 优化,但**必须**发 `COMPACTION` 事件让 UI 显示 "压缩中" — 用户需要知道 LLM 行为可能变了
-- **runtime-supervisor 删除的影响**:PM 拍板删除。需要 grep 全仓确认无其它引用(`http-server.ts` 可能存有 `runtimeSupervisor` 字段),无引用后删除整个文件
+- **压缩对 prompt cache 的影响**:PM 提醒:压缩会破坏 prompt cache。Forge 本次**不**做 cache 优化,但**必须**发 `COMPACTION` 事件让 UI 显示 "压缩中" — 用户需要知道 LLM 行为可能变了
+- **runtime-supervisor 删除的影响**:PM 拍板删除。grep 全仓确认无其它引用,`http-server.ts` 中 `RuntimeSupervisor` import + `new RuntimeSupervisor(...)` 同步删除
+- **LLM-summary 模式未实现**:Pi 完整 `prepareCompaction` 要 fileOps,本次只做 truncate。Phase 5.x 补全时需要补 `SessionEntry[]` ↔ `AgentMessage[]` 转换层
 
 ---
 

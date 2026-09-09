@@ -32,6 +32,7 @@ export interface DesktopState {
   }) => Promise<void>;
   steer: (message: string) => Promise<void>;
   abort: () => Promise<void>;
+  resume: (message?: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   approve: (requestId: string) => Promise<void>;
   deny: (requestId: string) => Promise<void>;
@@ -279,6 +280,21 @@ export const store = create<DesktopState>((set, get) => ({
     if (!id) return;
     const { abortSession } = await import("./api.ts");
     await abortSession(id);
+  },
+
+  resume: async (message) => {
+    const id = get().activeSessionId;
+    if (!id) return;
+    const { resumeSession } = await import("./api.ts");
+    set({ error: null });
+    try {
+      await resumeSession(id, message);
+      // SSE session_started will drive the running state; just nudge the
+      // sessions list so the row's status badge updates.
+      await get().refreshSessions();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
   },
 
   remove: async (id) => {

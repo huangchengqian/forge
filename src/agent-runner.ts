@@ -12,6 +12,7 @@ import { mapAgentEventToPersisted } from "./events/mapper.ts";
 import { makeBeforeToolCall } from "./guardrails/before-tool-call.ts";
 import { makeAfterToolCall } from "./guardrails/after-tool-call.ts";
 import { makeTransformContext } from "./guardrails/transform-context.ts";
+import { makePrepareNextTurn } from "./guardrails/compaction.ts";
 import { makeShouldStopAfterTurn } from "./guardrails/should-stop-after-turn.ts";
 import type { GuardrailConfig } from "./guardrails/types.ts";
 import type { Session } from "./types.ts";
@@ -69,6 +70,14 @@ export async function runAgent(opts: {
     config.afterToolCall = makeAfterToolCall(guardrails);
     config.shouldStopAfterTurn = makeShouldStopAfterTurn(guardrails);
     config.getSteeringMessages = async () => guardrails.steeringQueue.splice(0);
+    // prepareNextTurn uses the real per-turn inputTokens (provider-reported)
+    // rather than the character estimate in transformContext. transformContext
+    // remains as a coarse last-resort guard for sessions without cost data.
+    config.prepareNextTurn = makePrepareNextTurn({
+      sessionId: session.id,
+      costGuard: guardrails.costGuard,
+      emitEvent: (type, payload) => appendEvent(session.id, type as Parameters<typeof appendEvent>[1], payload),
+    });
   }
 
   const prompts: AgentMessage[] = [
@@ -98,6 +107,12 @@ export async function runAgent(opts: {
     }
   }
 
-  session.messages = await stream.result();
+  // Pi's `agentLoop` returns `result()` as the *delta* (newMessages) — only
+  // the prompt(s) we passed in plus any assistant/tool messages it produced
+  // during this run. The initial `context.messages` (which on resume is the
+  // replayed transcript) is NOT included. We concatenate to preserve the
+  // full conversation.
+  const newMessages = await stream.result();
+  session.messages = [...session.messages, ...newMessages];
   return session;
 }

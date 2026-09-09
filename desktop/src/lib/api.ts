@@ -75,6 +75,10 @@ export async function abortSession(id: string): Promise<void> {
   await send(`/sessions/${id}/abort`, "POST");
 }
 
+export async function resumeSession(id: string, message?: string): Promise<void> {
+  await send(`/sessions/${id}/resume`, "POST", message ? { message } : {});
+}
+
 export async function deleteSession(id: string): Promise<void> {
   await send(`/sessions/${id}`, "DELETE");
 }

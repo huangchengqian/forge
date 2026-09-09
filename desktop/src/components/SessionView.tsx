@@ -111,11 +111,15 @@ export function SessionView({ sessionId, goal, status, failureReason }: {
   const costBudget = store((s) => s.conversation.costBudget);
   const steer = store((s) => s.steer);
   const abort = store((s) => s.abort);
+  const resume = store((s) => s.resume);
   const showDiff = store((s) => s.showDiff);
   const undo = store((s) => s.undo);
   const diffText = store((s) => s.diffText);
   const [steerInput, setSteerInput] = useState("");
+  const [resumeOpen, setResumeOpen] = useState(false);
+  const [resumeMessage, setResumeMessage] = useState("");
   const running = status === "running";
+  const resumable = status === "failed" || status === "cancelled";
 
   const endRef = (el: HTMLDivElement | null) => {
     el?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -147,9 +151,63 @@ export function SessionView({ sessionId, goal, status, failureReason }: {
             ■ Stop
           </button>
         )}
+        {resumable && (
+          <button
+            className="btn btn-primary btn-small"
+            onClick={() => {
+              setResumeMessage("");
+              setResumeOpen(true);
+            }}
+            title="Resume this session from its event log"
+          >
+            ↻ Resume
+          </button>
+        )}
         <button className="btn btn-ghost btn-small" onClick={() => void showDiff()}>Diff</button>
         <button className="btn btn-ghost btn-small" onClick={() => void undo()}>Undo</button>
       </div>
+
+      {resumeOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setResumeOpen(false);
+          }}
+        >
+          <div className="modal">
+            <h3 style={{ marginTop: 0 }}>Resume session</h3>
+            <p style={{ color: "var(--text-muted)", marginTop: 0 }}>
+              The agent will continue from its event log. Optionally add a
+              steering instruction (e.g. "also fix the failing tests").
+            </p>
+            <textarea
+              className="composer-textarea"
+              placeholder="Optional: e.g. also fix the failing tests"
+              value={resumeMessage}
+              onChange={(e) => setResumeMessage(e.target.value)}
+              rows={3}
+              style={{ width: "100%", marginBottom: 12 }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                className="btn btn-ghost btn-small"
+                onClick={() => setResumeOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary btn-small"
+                onClick={async () => {
+                  await resume(resumeMessage.trim() || undefined);
+                  setResumeOpen(false);
+                }}
+              >
+                Resume
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 28px" }}>
         <div style={{ maxWidth: 760, margin: "0 auto", paddingBottom: 24 }}>
