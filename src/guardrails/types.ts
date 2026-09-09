@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { CompletionConfig } from "../types.ts";
+import type { CompletionConfig, Session } from "../types.ts";
 import type { CostGuard } from "./cost-guard.ts";
 
 /**
@@ -20,6 +20,8 @@ export interface ApprovalRelay {
 export interface GuardrailConfig {
   sessionId: string;
   workspace: string;
+  /** Live session reference: the stop gate writes failureReason/lastEvaluation. */
+  session: Session;
   completion: CompletionConfig;
   approval: ApprovalRelay;
   steeringQueue: AgentMessage[];
