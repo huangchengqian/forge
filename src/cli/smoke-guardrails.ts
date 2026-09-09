@@ -97,6 +97,7 @@ async function main(): Promise<void> {
     trustLevel: "medium",
     completionCriteria: [],
     lastEvaluation: null,
+    maxTurns: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

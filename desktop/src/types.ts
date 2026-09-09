@@ -14,6 +14,7 @@ export interface Session {
   failureReason: string | null;
   cost: { total: number; budget: number | null };
   trustLevel: TrustLevel;
+  maxTurns: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -92,4 +93,8 @@ export interface ConversationView {
   costSpent: number;
   costBudget: number | null;
   stuck: StuckWarningView | null;
+  /** Last compaction seen on the stream (mode: "llm-summary" | "truncate"). */
+  compaction: { mode: string; at: number } | null;
+  /** Set when the stream replays a SESSION_RESUMED marker. */
+  resumed: { messagesRecovered: number } | null;
 }

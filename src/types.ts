@@ -25,6 +25,8 @@ export interface Session {
   trustLevel: TrustLevel;
   completionCriteria: SuccessCriterion[];
   lastEvaluation: EvaluationResult | null;
+  /** Turn budget; null = unbounded. Persisted since schema v5 (survives resume). */
+  maxTurns: number | null;
   createdAt: number;
   updatedAt: number;
 }

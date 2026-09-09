@@ -93,6 +93,7 @@ async function main(): Promise<void> {
     trustLevel: "high",
     completionCriteria: [{ kind: "file_contains", path: "hello.txt", pattern: "export" }],
     lastEvaluation: null,
+    maxTurns: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

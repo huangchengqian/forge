@@ -99,6 +99,59 @@ function StuckWarning() {
   );
 }
 
+/** Shown once a COMPACTION event arrives — the model's view of history just changed. */
+function CompactionNotice() {
+  const compaction = store((s) => s.conversation.compaction);
+  if (!compaction) return null;
+  return (
+    <div
+      style={{
+        margin: "10px 0",
+        padding: "8px 12px",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        color: "var(--text-secondary)",
+        fontSize: 12.5,
+      }}
+    >
+      ✦ Context compacted ({compaction.mode}) — older history was summarized into a checkpoint.
+      The model's view of the conversation changed; behaviour may differ slightly.
+    </div>
+  );
+}
+
+/** Shown when the stream replays a SESSION_RESUMED marker. */
+function ResumedNotice() {
+  const resumed = store((s) => s.conversation.resumed);
+  if (!resumed) return null;
+  return (
+    <div
+      style={{
+        margin: "10px 0",
+        padding: "8px 12px",
+        border: "1px solid var(--green)",
+        borderRadius: 8,
+        color: "var(--green)",
+        fontSize: 12.5,
+      }}
+    >
+      ↻ Resumed — recovered {resumed.messagesRecovered} message
+      {resumed.messagesRecovered === 1 ? "" : "s"} from the event log.
+    </div>
+  );
+}
+
+/** Empty-state: a session with no conversation output at all. */
+function EmptyConversation() {
+  const conversation = store((s) => s.conversation);
+  if (conversation.messages.length > 0 || conversation.toolCalls.length > 0) return null;
+  return (
+    <div style={{ margin: "32px 0", color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
+      No messages yet. The agent hasn't produced any output for this session.
+    </div>
+  );
+}
+
 export function SessionView({ sessionId, goal, status, failureReason }: {
   sessionId: string;
   goal: string;
@@ -211,6 +264,8 @@ export function SessionView({ sessionId, goal, status, failureReason }: {
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 28px" }}>
         <div style={{ maxWidth: 760, margin: "0 auto", paddingBottom: 24 }}>
+          <ResumedNotice />
+          <EmptyConversation />
           {conversation.messages.map((m, i) => (
             <div key={i} style={{ margin: "16px 0" }}>
               <div className="role-label">{m.role === "user" ? "You" : "Agent"}</div>
@@ -224,6 +279,7 @@ export function SessionView({ sessionId, goal, status, failureReason }: {
             <ToolRow key={call.toolCallId} call={call} />
           ))}
 
+          <CompactionNotice />
           <VerificationPanel />
           <StuckWarning />
 

@@ -50,6 +50,8 @@ const emptyConversation = (): ConversationView => ({
   costSpent: 0,
   costBudget: null,
   stuck: null,
+  compaction: null,
+  resumed: null,
 });
 
 let source: EventSource | null = null;
@@ -158,6 +160,21 @@ function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial<Deskto
         repetitions: Number(payload.repetitions ?? 0),
       };
       conversation.stuck = stuck;
+      return { conversation };
+    }
+
+    case "COMPACTION": {
+      conversation.compaction = {
+        mode: String(payload.mode ?? "unknown"),
+        at: env.at ?? Date.now(),
+      };
+      return { conversation };
+    }
+
+    case "SESSION_RESUMED": {
+      conversation.resumed = {
+        messagesRecovered: Number(payload.messagesRecovered ?? 0),
+      };
       return { conversation };
     }
 

@@ -86,6 +86,7 @@ export class SessionManager {
       trustLevel,
       completionCriteria: input.criteria ?? [],
       lastEvaluation: null,
+      maxTurns: input.maxTurns ?? null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -210,10 +211,9 @@ export class SessionManager {
     const launchOpts = {
       trustLevel: session.trustLevel,
       criteria: session.completionCriteria,
-      // Note: maxTurns is not persisted on Session in schema v4; resume is
-      // unbounded by turns, only by cost budget. PM accepted this gap.
+      // Turn budget is persisted since schema v5 and survives resume.
       maxCost: session.cost.budget,
-      maxTurns: null,
+      maxTurns: session.maxTurns,
     };
     const { controller, steeringQueue, runPromise } = await this.launchAgent(
       session,

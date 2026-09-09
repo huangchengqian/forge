@@ -1,4 +1,4 @@
-export const SESSION_SCHEMA_VERSION = 4;
+export const SESSION_SCHEMA_VERSION = 5;
 
 type Migration = {
   from: number;
@@ -32,6 +32,19 @@ function mapTaskStateToSessionStatus(state: unknown): SessionStatusLike {
 
 type SessionStatusLike = "running" | "completed" | "failed" | "cancelled";
 
+/**
+ * v4 → v5: persist `maxTurns`.
+ *
+ * The turn budget was previously only carried in the in-memory
+ * CompletionConfig — a resumed session lost it and ran unbounded by turns.
+ * v5 persists it on the session (null = unbounded). Old v4 sessions get
+ * null: their original budget was never recorded, so there is nothing to
+ * restore honestly.
+ */
+function addMaxTurns(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, maxTurns: null };
+}
+
 const MIGRATIONS: readonly Migration[] = [
   {
     from: 0,
@@ -52,6 +65,11 @@ const MIGRATIONS: readonly Migration[] = [
     from: 3,
     to: 4,
     migrate: (raw) => migrateLegacyTaskToSession(raw),
+  },
+  {
+    from: 4,
+    to: 5,
+    migrate: (raw) => addMaxTurns(raw),
   },
 ];
 
@@ -81,6 +99,7 @@ function migrateLegacyTaskToSession(raw: Record<string, unknown>): Record<string
     trustLevel: "medium",
     completionCriteria: [],
     lastEvaluation: raw.lastEvaluation ?? null,
+    maxTurns: null,
     createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
     // legacy fields deliberately dropped:
