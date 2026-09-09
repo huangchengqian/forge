@@ -58,6 +58,7 @@ check "verify-loop smoke"     "cd $ROOT && npx tsx src/cli/smoke-verification.ts
 check "server smoke"          "cd $ROOT && npx tsx src/cli/smoke-server.ts"
 check "recovery smoke"        "cd $ROOT && npx tsx src/cli/smoke-recovery.ts"
 check "compaction smoke"      "cd $ROOT && npx tsx src/cli/smoke-compaction.ts"
+check "benchmark goldens"     "cd $ROOT && npx tsx src/cli/benchmark.ts"
 
 echo ""
 echo "==== Summary: $PASS/$TOTAL passed, $FAIL failed ===="

@@ -1,0 +1,180 @@
+/**
+ * Phase 6 benchmark: the four golden tasks (ROADMAP §7).
+ *
+ * Each task = a deterministic LLM script + session config + assertions.
+ * Everything else (agentLoop, tools, guardrails, event log) runs for real.
+ * Scripts are factories of the workspace path — tools resolve absolute
+ * paths only, so the harness injects the temp workspace when building.
+ */
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { scriptedAssistantMessage, text, toolCall, type Script } from "./scripted-runtime.ts";
+import type { Assertion, GoldenTask } from "./harness.ts";
+
+const W = (id: string, path: string, content: string) =>
+  scriptedAssistantMessage([toolCall(id, "write", { path, content })], "toolUse");
+
+// ---------------------------------------------------------------------------
+// golden_create_file — the "hello world" of the whole architecture.
+// ---------------------------------------------------------------------------
+const createFileScript = (ws: string): Script => [
+  W("call-1", join(ws, "hello.txt"), "hello world\n"),
+  scriptedAssistantMessage([text("Done — hello.txt created.")]),
+];
+
+export const goldenCreateFile: GoldenTask = {
+  name: "golden_create_file",
+  category: "new-feature",
+  goal: "Create hello.txt saying hello",
+  trustLevel: "medium",
+  criteria: [{ kind: "file_contains", path: "hello.txt", pattern: "hello" }],
+  maxTurns: 8,
+  script: createFileScript,
+  assert: ({ session, metrics, workspace, runtime }) => {
+    const a: Assertion[] = [];
+    a.push({
+      name: "state=completed",
+      pass: metrics.state === "completed",
+      detail: `state=${metrics.state} reason=${session.failureReason}`,
+    });
+    a.push({ name: "vfail=0", pass: metrics.vfail === 0, detail: `sequence=${JSON.stringify(metrics.verificationSequence)}` });
+    a.push({ name: "script consumed exactly", pass: !runtime.overran() && runtime.consumed() === 2, detail: `consumed=${runtime.consumed()}` });
+    const p = join(workspace, "hello.txt");
+    const content = existsSync(p) ? readFileSync(p, "utf8") : "";
+    a.push({ name: "file contains 'hello'", pass: content.includes("hello"), detail: JSON.stringify(content.slice(0, 40)) });
+    return a;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// golden_verify_fail — the verify-fix loop (don't trust "model says done").
+// ---------------------------------------------------------------------------
+const verifyFailScript = (ws: string): Script => [
+  W("call-1", join(ws, "util.ts"), "function util() {}\n"), // buggy: no export
+  scriptedAssistantMessage([text("Done! util.ts created.")]), // verification FAILS
+  W("call-2", join(ws, "util.ts"), "export function util(): number {\n  return 42;\n}\n"), // the fix
+  scriptedAssistantMessage([text("Fixed — export added.")]), // verification PASSES
+];
+
+export const goldenVerifyFail: GoldenTask = {
+  name: "golden_verify_fail",
+  category: "verification",
+  goal: "Create util.ts with an export (model forgets, verification catches)",
+  trustLevel: "high",
+  criteria: [{ kind: "file_contains", path: "util.ts", pattern: "export" }],
+  maxTurns: 12,
+  script: verifyFailScript,
+  assert: ({ session, metrics, workspace, runtime }) => {
+    const a: Assertion[] = [];
+    a.push({
+      name: "state=completed",
+      pass: metrics.state === "completed",
+      detail: `state=${metrics.state} reason=${session.failureReason}`,
+    });
+    a.push({
+      name: "verification sequence [false, true]",
+      pass:
+        metrics.verificationSequence.length === 2 &&
+        metrics.verificationSequence[0] === false &&
+        metrics.verificationSequence[1] === true,
+      detail: JSON.stringify(metrics.verificationSequence),
+    });
+    a.push({ name: "eval score present (high trust)", pass: metrics.evalScore !== null, detail: `eval=${metrics.evalScore}` });
+    a.push({ name: "script consumed exactly", pass: !runtime.overran() && runtime.consumed() === 4, detail: `consumed=${runtime.consumed()}` });
+    const p = join(workspace, "util.ts");
+    const content = existsSync(p) ? readFileSync(p, "utf8") : "";
+    a.push({ name: "final file has export", pass: content.includes("export"), detail: JSON.stringify(content.slice(0, 40)) });
+    return a;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// golden_stuck_loop — stuck detection terminates the burn before cost does.
+// ---------------------------------------------------------------------------
+function stuckScript(reps: number): Script {
+  const s: Script = [];
+  for (let i = 0; i < reps; i++) {
+    // Identical args+content → identical observation → action_observation_loop.
+    // Path is relative on purpose: identical args matter, and the write tool
+    // rejecting/accepting makes no difference to the repetition signature.
+    s.push(scriptedAssistantMessage([toolCall("call-stuck", "write", { path: "loop.txt", content: "same\n" })], "toolUse"));
+  }
+  return s;
+}
+
+export const goldenStuckLoop: GoldenTask = {
+  name: "golden_stuck_loop",
+  category: "recovery",
+  goal: "Agent repeats an identical write forever (stuck)",
+  trustLevel: "medium",
+  criteria: [],
+  maxTurns: 32,
+  script: () => stuckScript(10),
+  assert: ({ metrics, runtime, session }) => {
+    const a: Assertion[] = [];
+    a.push({
+      name: "STUCK_WARNING emitted",
+      pass: metrics.stuckPatterns.includes("action_observation_loop"),
+      detail: JSON.stringify(metrics.stuckPatterns),
+    });
+    a.push({
+      name: "loop terminated early (before script end)",
+      pass: runtime.consumed() < 10,
+      detail: `consumed=${runtime.consumed()} of 10 scripted turns`,
+    });
+    a.push({
+      name: "state=failed (guardrail kill recorded)",
+      pass:
+        metrics.state === "failed" &&
+        metrics.failureReason !== null &&
+        metrics.failureReason.startsWith("stuck detected"),
+      detail: `state=${metrics.state} reason=${metrics.failureReason}`,
+    });
+    return a;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// golden_multi_step — multiple dependent artifacts across turns.
+// ---------------------------------------------------------------------------
+const multiStepScript = (ws: string): Script => [
+  W("call-1", join(ws, "util.ts"), "export function add(a: number, b: number): number {\n  return a + b;\n}\n"),
+  W("call-2", join(ws, "main.ts"), "import { add } from './util.ts';\nconsole.log(add(1, 2));\n"),
+  scriptedAssistantMessage([text("Both files written.")]),
+];
+
+export const goldenMultiStep: GoldenTask = {
+  name: "golden_multi_step",
+  category: "new-feature",
+  goal: "Create util.ts and main.ts that imports it",
+  trustLevel: "medium",
+  criteria: [
+    { kind: "file_contains", path: "util.ts", pattern: "export function add" },
+    { kind: "file_contains", path: "main.ts", pattern: "add" },
+  ],
+  maxTurns: 10,
+  script: multiStepScript,
+  assert: ({ session, metrics, workspace, runtime }) => {
+    const a: Assertion[] = [];
+    a.push({
+      name: "state=completed",
+      pass: metrics.state === "completed",
+      detail: `state=${metrics.state} reason=${session.failureReason}`,
+    });
+    a.push({ name: "vfail=0", pass: metrics.vfail === 0, detail: `sequence=${JSON.stringify(metrics.verificationSequence)}` });
+    a.push({ name: "script consumed exactly", pass: !runtime.overran() && runtime.consumed() === 3, detail: `consumed=${runtime.consumed()}` });
+    const util = join(workspace, "util.ts");
+    const main = join(workspace, "main.ts");
+    a.push({
+      name: "both artifacts correct",
+      pass:
+        existsSync(util) &&
+        existsSync(main) &&
+        readFileSync(util, "utf8").includes("export function add") &&
+        readFileSync(main, "utf8").includes("add"),
+    });
+    return a;
+  },
+};
+
+export const GOLDEN_TASKS = [goldenCreateFile, goldenVerifyFail, goldenStuckLoop, goldenMultiStep];

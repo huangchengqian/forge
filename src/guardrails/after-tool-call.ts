@@ -31,6 +31,11 @@ export function makeAfterToolCall(config: GuardrailConfig) {
         pattern: stuck.pattern,
         repetitions: stuck.repetitions,
       }).catch(() => {});
+      // Record WHY the session is being killed on the session itself. Pi's
+      // loop ends gracefully on terminate (no exception), so without this
+      // the SessionManager settle path would mark a guardrail-killed run
+      // as "completed" — misleading the UI and the audit trail.
+      config.session.failureReason = `stuck detected: ${stuck.pattern} (${stuck.repetitions} repetitions)`;
       return { terminate: true };
     }
 

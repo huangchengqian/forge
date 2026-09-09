@@ -94,10 +94,13 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
 
     // --- 2. Hard stoppers ---
     if (config.costGuard.isExhausted()) {
+      // Abandonment must be visible: a budget-killed run is not "completed".
+      config.session.failureReason ??= "cost budget exhausted";
       await recordVerification(false, "cost budget exhausted").catch(() => {});
       return true;
     }
     if (config.completion.maxTurns !== null && turnCount >= config.completion.maxTurns) {
+      config.session.failureReason ??= "max turns reached";
       await recordVerification(false, "max turns reached").catch(() => {});
       return true;
     }
