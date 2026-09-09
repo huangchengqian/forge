@@ -267,5 +267,17 @@ Phase 2/3 只设计了这三个的 bus 类型，**从未写进 JSONL**。因此"
 - SSE / desktop UI 不消费 bus（设计不变）
 - 订阅者用 type narrowing 区分控制面/数据面（取代原本的 type-level union 区分）
 
-**当前 EventBus 真实订阅者 = 0**。协议就位，等第一个 in-process consumer（analytics / watchdog / cross-guardrail 通信）。
+**当前 EventBus 真实订阅者 = 0**。fan-out 机制就位（~15 行，沉没成本）。**下一个需要 bus 的 feature 出现时，就地写订阅者，需求驱动**——候选场景：SSE 审批实时推送、成本聚合、watchdog。不预建任何东西。
+
+### 8.1 大单体框架修正（PM 拍板，2026-09-09）
+
+PM 纠正本决策讨论中的措辞框架："第一个订阅者出现""协议""契约""开牌条件"等表述预设了分布式引力。**Forge 是大单体**：进程内模块间不做协议化设计，编译器即契约，进程内 refactor 是编译器引导的常规操作。真实边界只有两个：桌面 ↔ server（HTTP/SSE，Tauri 进程模型实现细节）、代码 ↔ 磁盘（JSONL / session 文件，forward-only 纪律仅适用于此）。bus 不是第三个边界。
+
+由此降级本文件此前两条 Anvil 主张的严重度：
+- 辩驳 3（磁盘格式耦合污染进程内协议）→ 降为风格偏好：磁盘 schema 变更波及进程内代码，但波及编译器可见、可低成本跟随
+- "payload cast 累积 → discriminated union 迁移"触发条款 → 作废：单体里 cast 积累是痒非险，第一个消费者嫌烦时就地改类型即可
+
+保留不变：磁盘 JSONL 的 forward-only 纪律（唯一真协议边界）；控制面过滤（理由修正为"进程内 listener 不被每 turn 100+ 数据面事件淹没"的观察者常识默认值，非协议偏好）。
+
+已同步 AGENTS.md §3（Monolith Principle）+ §7.3（EventBus fan-out 规则）。
 

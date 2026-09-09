@@ -62,6 +62,14 @@ Forge (guardrails) → AgentLoopConfig hooks → Pi (agent loop)
 
 Forge injects guardrails as callbacks. Pi owns the loop. One loop, not two.
 
+## Monolith Principle
+
+Forge is a big monolith. In-process module boundaries are NOT protocol boundaries.
+
+- The compiler is the contract. No versioning, no migration, no deprecation windows for in-process types.
+- The only two real boundaries: desktop ↔ server (HTTP/SSE — a Tauri process-model detail, not a service boundary) and code ↔ disk (JSONL / session files — forward-only compatibility discipline applies here, and only here).
+- In-process event distribution uses the observer pattern (EventBus), justified by "publishers must not import subscriber modules" — not by "protocol independence".
+
 ---
 
 ## 4. Integration Rules
@@ -238,6 +246,14 @@ The log is the source of truth for:
 Event log writes are FIFO-ordered.
 
 Concurrent `appendFile` calls race in the libuv threadpool. Per-session Promise chain ensures call-order persistence.
+
+### Rule 7.3
+
+The EventBus is a fan-out of the event log, not a second source of truth.
+
+`appendEvent` writes to the JSONL log, then fans out control-plane events (`isControlEvent`) to the in-process `defaultBus`. Data-plane events (TURN / MESSAGE / TEXT_DELTA / TOOL families) stay in the log only — in-process listeners must not be flooded by per-turn data volume.
+
+SSE and the desktop read the log, never the bus. Subscriber count today is zero: when a feature needs the bus, subscribe in the module that needs it — no new machinery, no protocol layers.
 
 ---
 
