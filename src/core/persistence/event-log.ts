@@ -31,6 +31,15 @@ export type PersistedEventType =
   | "VERIFICATION_RESULT"
   | "COST_UPDATE"
   | "STUCK_WARNING"
+  // Phase 3: tool-policy boundaries (added with the EventBus collapse — see
+  // docs/25 §6.2 phase 1). Payload shape:
+  //   GUARD_BLOCKED            → { toolName: string, reason: string, kind?: "guard_denied" }
+  //   GUARD_APPROVAL_REQUEST   → { requestId: string, toolName: string, kind?: "guard_approval_request" }
+  | "GUARD_BLOCKED"
+  | "GUARD_APPROVAL_REQUEST"
+  // Phase 3: trust-level-high evaluator round. Payload shape:
+  //   EVALUATION_COMPLETED     → EvaluationResult ({ taskId, score, status, findings, evidence })
+  | "EVALUATION_COMPLETED"
   // Phase 5: compaction
   | "COMPACTION"
   | "COMPACTION_FAILED";

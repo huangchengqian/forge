@@ -31,8 +31,7 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
     const decision = evaluateToolCall(loadPolicy(), toolName, input);
 
     if (decision.action === "deny") {
-      await appendEvent(config.sessionId, "STUCK_WARNING", {
-        kind: "guard_denied",
+      await appendEvent(config.sessionId, "GUARD_BLOCKED", {
         toolName,
         reason: decision.reason ?? "denied by policy",
       }).catch(() => {});
@@ -55,8 +54,7 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
     // 3. `ask` → approval dialog, blocking with a hard timeout.
     if (decision.action === "ask") {
       const requestId = ctx.toolCall.id;
-      await appendEvent(config.sessionId, "STEERING_QUEUED", {
-        kind: "guard_approval_request",
+      await appendEvent(config.sessionId, "GUARD_APPROVAL_REQUEST", {
         requestId,
         toolName,
       }).catch(() => {});

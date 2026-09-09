@@ -163,6 +163,12 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
       if (trustLevel === "high") {
         const evalResult = await evaluator.evaluate({ session: config.session });
         config.session.lastEvaluation = evalResult;
+        // Persist the full evaluation result so UI / recovery can render
+        // evaluator findings, not just the pass/fail verdict that
+        // VERIFICATION_RESULT carries.
+        await appendEvent(config.sessionId, "EVALUATION_COMPLETED", {
+          ...evalResult,
+        }).catch(() => {});
         if (evalResult.status === "REVIEW_REQUIRED") {
           await recordVerification(false, "evaluator flagged review-required findings").catch(
             () => {},
