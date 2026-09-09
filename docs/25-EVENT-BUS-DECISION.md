@@ -2,8 +2,8 @@
 
 > 决策归属：Anvil ↔ 产品经理
 > 触发：Phase 5 收尾时，PM 提出"删掉 bus event 回调"以清理 Phase 2 遗留
-> 当前状态：等 PM 拍 (A)/(B)/(C)
-> 写入时间：2026-09-09
+> 当前状态：**已拍板** — Phase 5.1 修正版 C（appendEvent fan-out；统一 PersistedEventType；删 ForgeEvent）
+> 写入时间：2026-09-09（拍板更新：2026-09-09）
 
 ---
 
@@ -148,7 +148,7 @@ src/events/publisher.ts:6:  bus.publish(event);                            ← h
 
 ---
 
-## 5. 推荐顺序
+## 5. 推荐顺序（历史快照 — 拍板前 Anvil 的推荐，已被 §6 取代）
 
 **短期**（30 分钟）：方案 (B) — 修 Phase 2 真实瑕疵，骨架保留。
 
@@ -158,11 +158,81 @@ src/events/publisher.ts:6:  bus.publish(event);                            ← h
 
 ---
 
-## 6. 决策记录
+## 6. PM 拍板 — Phase 5.1 修正版 C
 
-> **PM 拍板**：tbd
+2026-09-09 PM 拍板（高人力荐删 ForgeEvent，PM 采纳）。
 
-> **Anvil 立场**：倾向 (B)/(C)，反对 (A)。
+**直接做修正版 C。不做 B，不做 A。**
 
-> **执行前必须**：PM 在 PR 评论或 commit message 里明确 (A)/(B)/(C) 之一。
+1. `appendEvent` 成功后 fan-out 到 EventBus —— bus 是 event log 的扇出，不是独立路径
+2. 统一类型系统为 PersistedEventType，删 ForgeEvent
+3. 删 `onEvent` 回调（被 appendEvent 内部 fan-out 替代）
+4. SSE 只读 event log（不变）
+5. Desktop UI 只读 SSE（不消费 bus）
+
+**不做 B**：B 修 stub 的代码会被 C 的 appendEvent fan-out 直接替掉。先做等于写一遍扔一遍。
+
+**不做 Anvil 原始 C**：Anvil 原始 C 假设 SSE 要合并 log + bus 双重来源 —— 错误前提。SSE 永远只读 event log，bus 不流入 SSE；bus 是 appendEvent 的扇出，不是并行路径，不需要 seq 去重。**此点 Anvil 接受并收回。**
+
+**类型统一的前提（PM）**：PersistedEventType 已覆盖全部事件类型（agent 事件 + 护栏事件都已写进 JSONL），ForgeEvent 当前 0 个真实消费者，迁移成本为零，不需要映射层。
+
+---
+
+## 6.1 Anvil 最终辩驳（记录在案，不阻止执行）
+
+PM 已拍板，Anvil 按修正版 C 执行。以下辩驳**不是翻案**，是记录在案，供将来第一个 in-process 订阅者出现时回看。
+
+Anvil 承认对的部分：appendEvent fan-out 解决"0 来源"是对的；删 `onEvent` stub 是对的；SSE/UI 只读 log 是对的；"SSE 合并双源 + seq 去重"是原始 C 的错误前提，已收回。
+
+分歧收敛到**唯一一点：bus 的协议面是否保留"控制面 vs 数据面"区分**。
+
+### 辩驳 1（事实）— "PersistedEventType 已覆盖全部事件类型"不成立
+
+实测 `src/core/persistence/event-log.ts` 的 `PersistedEventType`：
+
+| ForgeEvent 控制面类型 | PersistedEventType 里有没有 |
+|---|---|
+| `GUARD_BLOCKED` | ❌ 无 |
+| `GUARD_APPROVAL_REQUEST` | ❌ 无 |
+| `EVALUATION_COMPLETED` | ❌ 无 |
+
+Phase 2/3 只设计了这三个的 bus 类型，**从未写进 JSONL**。因此"统一类型 = 0 成本迁移"不成立。真实执行成本是三步：**(a) 往 PersistedEventType 补 3 个类型（磁盘 schema 变更）→ (b) 补 3 个事件写入源 → (c) 删 ForgeEvent**。若只按"删类型"执行而漏掉 (a)(b)，这三个控制面事件在统一后永久丢失。
+
+### 辩驳 2（架构）— 统一后 bus 协议面从"控制面 9 事件"膨胀为"全部 agent 流"
+
+修正版 C 的 fan-out 若把全部 PersistedEvent 推到 bus，订阅者会收到 `MESSAGE_STARTED` / `TEXT_DELTA` / `TOOL_CALL` 等数据面洪泛。今天的 0 消费者让代价隐形；代价在第一个 in-process 订阅者（analytics / 跨 guardrail 通信 / watchdog）出现那天开始付：每个订阅者都要自写"哪些类型是我关心的"过滤，控制面边界散落各订阅者，**失去单一权威定义**。AGENTS.md §7 双轨设计（log = 全量事实源，bus = 控制面通知）就此消失，且无机制阻止数据面/控制面在 bus 上重新混淆。
+
+### 辩驳 3（演进）— in-process 协议类型与磁盘格式耦合
+
+`PersistedEventType` 是落盘格式，受 AGENTS.md §8.2 forward-only migration 约束。拿它当 in-process 通知协议类型 = 磁盘格式演进（加 migration）会连带污染进程内协议。两者的演进速度和兼容约束本应不同。
+
+### 辩驳 4（替代成本）— 保留区分的增量成本接近零
+
+若要消除的是"两套独立类型定义的维护成本"，替代做法是让控制面成为 `PersistedEventType` 的**类型级子集**（约 10 行：`type ControlEvent = Extract<...>` + fan-out 处过滤），与修正版 C 的其余部分 100% 兼容，只多保留一个薄类型层。
+
+### Anvil 对"高人删"立场的承认
+
+若高人建议删的论点是 YAGNI（0 消费者时任何为将来设计的抽象都是负债），此论点 Anvil 反驳不了——它与辩驳 2 是同一枚硬币的两面。Anvil 唯一的坚持：ForgeEvent 不是空想抽象，它是 AGENTS.md §9.2 UI 契约表的具体化，**有文档锚点**。删它 = 文档与代码必须同步改；文档需诚实标注"控制面通知协议已并入 PersistedEventType，控制面边界待第一个订阅者出现时重建"。
+
+### 结论
+
+执行：按修正版 C。净效果记录在案：
+
+1. 丢失"控制面边界"的单一权威定义
+2. 三个护栏类型（`GUARD_BLOCKED` / `GUARD_APPROVAL_REQUEST` / `EVALUATION_COMPLETED`）从"待实现"变成"必须先补进磁盘 schema"（执行前置，见辩驳 1）
+3. bus 协议类型与磁盘格式耦合（forward-only migration 约束上浮到进程内协议）
+
+若未来第一个 in-process 订阅者要求"只收控制面"，届时需重建过滤层，成本高于今天保留薄类型层。
+
+---
+
+## 7. 决策记录
+
+> **PM 拍板**（2026-09-09）：修正版 C — `appendEvent` fan-out 到 EventBus；统一类型为 `PersistedEventType`；删 ForgeEvent；删 `onEvent` 回调；SSE 只读 log；Desktop UI 只读 SSE。参考高人力荐删 ForgeEvent。
+>
+> **Anvil 立场**：反对删 ForgeEvent 类型（辩驳见 §6.1，4 条理由），不阻止执行。原始 C 中"SSE 合并 log + bus 双源"的错误前提已收回。
+>
+> **执行前置（Anvil 提出，PM 未否决）**：先往 `PersistedEventType` 补 `GUARD_BLOCKED` / `GUARD_APPROVAL_REQUEST` / `EVALUATION_COMPLETED` 三类型 + 对应写入源，再删 ForgeEvent。否则三个控制面事件在统一后永久丢失。
+>
+> **状态**：决策已记录。代码执行待 PM"开干"。
 
