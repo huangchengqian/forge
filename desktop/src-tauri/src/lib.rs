@@ -60,14 +60,32 @@ fn spawn_sidecar(port: u16) -> Result<u32, String> {
     // old file and inject a dead port/token into the frontend (→ "Load failed").
     let hs_path = std::path::Path::new(forge_home()).join("server.json");
     let _ = std::fs::remove_file(&hs_path);
+
+    // Kill orphaned sidecar instances from previous sessions. They hold the
+    // port (a fresh serve would die with EADDRINUSE, silently) and a stale
+    // auth token (the frontend would get 401 on every request).
+    let _ = Command::new("pkill").args(["-f", "src/cli/serve.ts"]).output();
+
+    // Sidecar stdout/stderr go to a log file instead of being discarded —
+    // a sidecar that dies on boot was previously undiagnosable.
+    let log_path = std::path::Path::new(forge_home()).join("sidecar.log");
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("failed to open sidecar log: {e}"))?;
+    let log_err = log
+        .try_clone()
+        .map_err(|e| format!("failed to clone sidecar log handle: {e}"))?;
+
     let child = Command::new("node")
         .args(["--import", "tsx/esm", &serve_script, "--port", &port.to_string()])
         .current_dir(root)
         .env("FORGE_HOME", forge_home())
         .env("FORGE_RUNTIME", &runtime)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(log_err))
         .spawn()
         .map_err(|e| format!("failed to spawn forge serve: {e}"))?;
     let pid = child.id();

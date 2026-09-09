@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { store } from "../lib/store.ts";
-import { fetchProjects, selectProject } from "../lib/api.ts";
+import { addProject, fetchProjects, selectProject } from "../lib/api.ts";
 import type { ProjectRecord } from "../types.ts";
 import type { SessionStatus } from "../types.ts";
 
@@ -43,12 +43,31 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
     } catch { /* registry keeps prior state on failure */ }
   }
 
+  async function onAddProject() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({ directory: true, multiple: false, title: "Choose a project folder" });
+      if (typeof picked !== "string" || !picked) return;
+      const created = await addProject(picked);
+      setActiveProject(created.id);
+      await selectProject(created.id);
+      setProjects((await fetchProjects()).projects);
+    } catch (err) {
+      console.error("add project failed:", err);
+    }
+  }
+
   return (
     <div className="sidebar">
       {/* macOS traffic lights overlay this strip — keep it clear of content. */}
       <div className="sidebar-drag" />
 
-      <div className="side-section-label">Project</div>
+      <div className="side-header-row" style={{ marginTop: 4 }}>
+        <div className="side-section-label">Project</div>
+        <button className="side-add-btn" onClick={() => void onAddProject()} title="Add project folder">
+          +
+        </button>
+      </div>
       <select
         className="side-trigger"
         value={activeProject ?? ""}
