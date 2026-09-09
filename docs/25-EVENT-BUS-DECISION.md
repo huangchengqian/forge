@@ -236,3 +236,36 @@ Phase 2/3 只设计了这三个的 bus 类型，**从未写进 JSONL**。因此"
 >
 > **状态**：决策已记录。代码执行待 PM"开干"。
 
+---
+
+## 8. 执行落地
+
+**`f1bb221` (Phase 5.1 step 1+2)** — 前置补全：
+- `src/core/persistence/event-log.ts`：PersistedEventType 加 3 个控制面类型
+- `src/guardrails/before-tool-call.ts`：`STUCK_WARNING {kind:"guard_denied"}` → `GUARD_BLOCKED {toolName, reason}`；`STEERING_QUEUED {kind:"guard_approval_request"}` → `GUARD_APPROVAL_REQUEST {requestId, toolName}`（语义错位修复）
+- `src/guardrails/should-stop-after-turn.ts`：evaluator 跑完后追加 `EVALUATION_COMPLETED` payload=evalResult 全量
+- typecheck / replay 7/7 / smoke-guardrails / smoke-verification 全过
+
+**`22de439` (Phase 5.1 step 3-6 合并激进落地)** — 一次性落地 PM 拍板的修正版 C：
+- `src/events/publisher.ts` 删除
+- `src/events/index.ts` 删除
+- `src/events/event-types.ts`：删 ForgeEvent 9 事件并行类型，加 `ControlEventType` 子集（15 控制面：lifecycle 6 + guardrail 6 + compaction 2 + STEERING_QUEUED + VERIFICATION_RESULT）+ `ControlEvent` + `ControlEventListener`
+- `src/events/event-bus.ts`：EventBus 泛型化 + `defaultBus` 单例
+- `src/core/persistence/event-log.ts`：加 `CONTROL_EVENT_TYPES` Set + `isControlEvent(type): type is ControlEventType`；appendEvent 增加可选 `opts.bus`（默认 defaultBus），末尾 `if (isControlEvent(type)) bus.publish(event as ControlEvent)`
+- `src/server/session-manager.ts`：删 SessionManager opts.bus 字段 + launchAgent onEvent stub + 构造器简化
+- `src/agent-runner.ts`：删 onEvent 入参 + for await 里 onEvent?.() + AgentEvent type import
+- `src/server/http-server.ts`：删 EventBus 实例化 + dead subscribe + SessionManager 构造不传 bus
+- `src/cli/smoke-recovery.ts`：不再实例化 EventBus，构造器签名同步
+- `src/core/persistence/event-log-fanout.test.ts`（新，5 cases）+ `scripts/release-check.sh` 加入
+
+**门禁 22/22 PASS**（原 21 + fanout 测试 = 22 tests count）。
+
+**妥协记录**：
+- 采纳"删 ForgeEvent 9 事件并行类型"（高人 YAGNI 论点）
+- 采纳"保留控制面/数据面区分"（Anvil 辩驳）—— 用 `isControlEvent` 类型守卫 + `CONTROL_EVENT_TYPES` Set 实现
+- bus = event log 扇出（PM 决策），不是独立路径
+- SSE / desktop UI 不消费 bus（设计不变）
+- 订阅者用 type narrowing 区分控制面/数据面（取代原本的 type-level union 区分）
+
+**当前 EventBus 真实订阅者 = 0**。协议就位，等第一个 in-process consumer（analytics / watchdog / cross-guardrail 通信）。
+
