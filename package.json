@@ -22,8 +22,17 @@
     "typescript": "5.9.3"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.85.1",
-    "@earendil-works/pi-ai": "^0.85.1",
-    "@earendil-works/pi-coding-agent": "^0.85.1"
-  }
+    "@earendil-works/pi-agent-core": "0.84.4",
+    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.84.4"
+  },
+  "workspaces": [
+    "pi/packages/agent",
+    "pi/packages/ai",
+    "pi/packages/coding-agent",
+    "pi/packages/client",
+    "pi/packages/protocol",
+    "pi/packages/telemetry",
+    "pi/packages/tui"
+  ]
 }

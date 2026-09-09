@@ -64,7 +64,9 @@ Forge injects guardrails as callbacks. Pi owns the loop. One loop, not two.
 
 ### Pi is vendored — part of this monolith
 
-Pi is committed into this repo (`pi/`), directly modifiable, upstream optional. The Forge/Pi seam above is a convenience, not a wall.
+Pi is committed into this repo (`pi/`), directly modifiable, upstream optional. Forge's package.json declares the Pi packages as **npm workspaces** — `node_modules/@earendil-works/pi-*` are symlinks into `pi/packages/*`, so **editting `pi/` source changes what Forge runs** (rebuild the package's `dist` after editing; the build artifacts are git-tracked).
+
+The Forge/Pi seam above is a convenience, not a wall.
 
 - When Pi's internals are the cheaper path, modify Pi directly instead of building adapters in Forge (precedent: the `<think>` leak fix in Pi's openai-completions protocol).
 - Keep `pi/` edits concentrated and recorded in docs, so optional upstream sync stays affordable. This is economics, not ideology.
