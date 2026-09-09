@@ -11,7 +11,7 @@ describe("CostGuard", () => {
     assert.equal(g.isExhausted(), false);
   });
 
-  test("trackUsage accumulates cost.total and remembers last input", () => {
+  test("trackUsage accumulates cost.total and remembers last context size", () => {
     const g = new CostGuard(null);
     g.trackUsage({
       input: 100,
@@ -22,7 +22,11 @@ describe("CostGuard", () => {
       cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
     });
     assert.equal(g.getSpent(), 0.003);
-    assert.equal(g.getLastInputTokens(), 100);
+    // Context-window occupancy (calculateContextTokens: totalTokens, falling
+    // back to the component sum) — NOT raw usage.input. Some providers
+    // (MiniMax anthropic-compat) bill the whole prompt as cacheWrite and
+    // report input=0, which would pin the compaction trigger to zero.
+    assert.equal(g.getLastInputTokens(), 150);
 
     g.trackUsage({
       input: 200,
@@ -34,7 +38,22 @@ describe("CostGuard", () => {
     });
     assert.equal(g.getSpent(), 0.008);
     // lastInputTokens reflects the most recent turn, NOT a cumulative sum.
-    assert.equal(g.getLastInputTokens(), 200);
+    assert.equal(g.getLastInputTokens(), 280);
+  });
+
+  test("trackUsage sees context size through MiniMax-style cacheWrite usage", () => {
+    const g = new CostGuard(null);
+    // MiniMax anthropic-compat reports input=0 and the whole prompt as
+    // cacheWrite. Raw usage.input would permanently pin the trigger to zero.
+    g.trackUsage({
+      input: 0,
+      output: 42,
+      cacheRead: 0,
+      cacheWrite: 21,
+      totalTokens: 63,
+      cost: { input: 0, output: 0.0000504, cacheRead: 0, cacheWrite: 0.000007875, total: 0.000058275 },
+    });
+    assert.equal(g.getLastInputTokens(), 63);
   });
 
   test("trackUsage handles undefined or non-finite values without crashing", () => {

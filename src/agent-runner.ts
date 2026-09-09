@@ -72,10 +72,23 @@ export async function runAgent(opts: {
     // prepareNextTurn uses the real per-turn inputTokens (provider-reported)
     // rather than the character estimate in transformContext. transformContext
     // remains as a coarse last-resort guard for sessions without cost data.
+    // The summary runtime reuses the subscription streamFn, so the summary
+    // call rides on the same key without keys landing in persisted data.
     config.prepareNextTurn = makePrepareNextTurn({
       sessionId: session.id,
       costGuard: guardrails.costGuard,
       emitEvent: (type, payload) => appendEvent(session.id, type as Parameters<typeof appendEvent>[1], payload),
+      compact: {
+        model,
+        completeSimple: async (m: unknown, context: unknown, options: unknown) => {
+          const stream = (streamFn as (m: unknown, c: unknown, o: unknown) => { result(): Promise<unknown> })(
+            m,
+            context,
+            options,
+          );
+          return await stream.result();
+        },
+      },
     });
   }
 

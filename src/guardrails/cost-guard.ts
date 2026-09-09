@@ -1,4 +1,5 @@
 import type { Usage } from "@earendil-works/pi-ai";
+import { calculateContextTokens } from "@earendil-works/pi-agent-core";
 
 /**
  * Budget tracking with a hard circuit breaker. Fed from assistant-message
@@ -25,11 +26,15 @@ export class CostGuard {
         ? usage.cost.total
         : 0;
     this.spent += total;
-    // `usage.input` is the authoritative context-window size the provider billed
-    // for this turn. Reading this (not cumulative history) is what compaction
-    // thresholds should compare against.
-    if (typeof usage.input === "number" && Number.isFinite(usage.input)) {
-      this.lastInputTokens = usage.input;
+    // The authoritative "context window occupied this turn" is NOT
+    // `usage.input` alone: some providers (MiniMax anthropic-compat, e.g.)
+    // bill the whole prompt as cacheWrite and report input=0, which would
+    // permanently pin the compaction trigger to zero. Pi's
+    // calculateContextTokens (totalTokens, falling back to the component
+    // sum) is the same signal its own shouldCompact uses.
+    const contextTokens = calculateContextTokens(usage);
+    if (Number.isFinite(contextTokens) && contextTokens > 0) {
+      this.lastInputTokens = contextTokens;
     }
   }
 
