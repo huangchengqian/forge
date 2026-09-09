@@ -18,6 +18,15 @@ const statusLabel: Record<SessionStatus, string> = {
   cancelled: "Cancelled",
 };
 
+/** Compact relative time for the session list ("3m", "2h", "5d"). */
+function timeAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+  return `${Math.floor(diff / 86_400_000)}d`;
+}
+
 export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
   const sessions = store((s) => s.sessions);
   const activeId = store((s) => s.activeSessionId);
@@ -103,12 +112,27 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
             className={`session-item ${s.id === activeId ? "selected" : ""}`}
             onClick={() => select(s.id)}
           >
-            <span className="title" title={s.goal}>{s.goal || "(untitled)"}</span>
             <span
               className="state-dot"
               style={{ background: statusColor[s.status] }}
               title={statusLabel[s.status]}
             />
+            <span className="title" title={s.goal}>{s.goal || "(untitled)"}</span>
+            <span className="kind-tag">{s.kind === "task" ? "TASK" : "CHAT"}</span>
+            <span className="time">{timeAgo(s.updatedAt)}</span>
+            {s.id === activeId && (
+              <button
+                className="side-icon-btn session-del"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void remove(s.id);
+                }}
+                title="Delete session"
+                style={{ padding: "2px 5px", fontSize: 10, lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            )}
           </div>
         ))}
       </div>

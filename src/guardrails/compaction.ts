@@ -13,7 +13,7 @@ import {
   COMPACTION_SUMMARY_SUFFIX,
 } from "@earendil-works/pi-agent-core";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Usage } from "@earendil-works/pi-ai";
+import type { Model, Usage } from "@earendil-works/pi-ai";
 import type { CostGuard } from "./cost-guard.ts";
 
 /**
@@ -95,6 +95,9 @@ export function makePrepareNextTurn(opts: {
   keepRecentMessages?: number;
   emitEvent: (type: string, payload: Record<string, unknown>) => Promise<unknown>;
   compact?: SummaryRuntime;
+  /** Mid-session model switch: a non-null return replaces the loop's model
+   *  from this turn on (consumed once — SessionManager clears its slot). */
+  takeModelSwitch?: (() => Model<any> | null) | undefined;
 }): (ctx: PrepareNextTurnContext, signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> {
   const threshold =
     opts.thresholdTokens ??
@@ -134,6 +137,20 @@ export function makePrepareNextTurn(opts: {
     }
 
     const messages = ctx.context.messages;
+
+    // --- Mid-session model switch (checked before compaction — a switch
+    // invalidates the prompt cache anyway, so compaction decisions based on
+    // the old model's usage should wait for the new model's first turn). ---
+    if (opts.takeModelSwitch) {
+      const next = opts.takeModelSwitch();
+      if (next) {
+        if (debug) {
+          console.error(`[compaction] model switch -> ${(next as { id?: string }).id ?? "?"}`);
+        }
+        // No context change — Pi keeps the transcript and swaps the model.
+        return { model: next };
+      }
+    }
 
     // --- LLM-summary path ---
     // Note: keepRecentMessages bounds TRUNCATION only. Summary mode is

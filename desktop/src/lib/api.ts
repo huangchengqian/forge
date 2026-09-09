@@ -80,6 +80,10 @@ export async function resumeSession(id: string, message?: string): Promise<void>
   await send(`/sessions/${id}/resume`, "POST", message ? { message } : {});
 }
 
+export async function switchModel(id: string, providerId: string): Promise<{ modelId: string }> {
+  return send(`/sessions/${id}/model`, "POST", { providerId });
+}
+
 export async function deleteSession(id: string): Promise<void> {
   await send(`/sessions/${id}`, "DELETE");
 }

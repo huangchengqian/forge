@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Model } from "@earendil-works/pi-ai";
 import { runAgent } from "../agent-runner.ts";
 import { appendEvent } from "../core/persistence/event-log.ts";
 import { replaySession } from "../core/persistence/replay.ts";
@@ -41,6 +42,13 @@ const RESUMABLE_STATUSES: ReadonlySet<SessionStatus> = new Set([
 export class SessionManager {
   private active = new Map<string, ActiveEntry>();
   private idle = new Map<string, ActiveEntry>();
+  /**
+   * Mid-session model switches, keyed by sessionId. `switchModel()` parks a
+   * pre-built Model here; the prepareNextTurn hook picks it up at the next
+   * turn boundary and hands it to Pi's loop (AgentLoopTurnUpdate.model).
+   * Consumed at most once per switch.
+   */
+  private pendingModels = new Map<string, Model<any>>();
 
   constructor(
     private readonly opts: {
@@ -261,6 +269,38 @@ export class SessionManager {
   }
 
   /**
+   * Mid-session model switch. Running sessions: the new model takes effect
+   * at the next turn boundary (the prepareNextTurn hook consumes it from
+   * pendingModels and returns it as AgentLoopTurnUpdate.model). Idle
+   * sessions: persisted on the Session, effective on the next resume.
+   */
+  async switchModel(
+    sessionId: string,
+    providerId: string,
+  ): Promise<{ modelId: string }> {
+    const cfg = await loadForgeConfig(this.opts.forgeHome);
+    const subscription = resolveProvider(cfg, providerId);
+    if (!subscription) {
+      throw new Error(`no model subscription for provider "${providerId}"`);
+    }
+
+    if (this.active.has(sessionId)) {
+      this.pendingModels.set(sessionId, buildModel(subscription));
+    } else {
+      const session = await loadSession(sessionId);
+      if (!session) throw new Error(`session ${sessionId} not found`);
+      session.model = { provider: subscription.id, modelId: subscription.modelId };
+      await saveSession(session);
+    }
+
+    await appendEvent(sessionId, "MODEL_CHANGED", {
+      providerId: subscription.id,
+      modelId: subscription.modelId,
+    }).catch(() => {});
+    return { modelId: subscription.modelId };
+  }
+
+  /**
    * Launch the agent loop on a (possibly recovered) session. Shared by
    * `create()` and `resume()`. The caller owns the CostGuard's lifetime and
    * is responsible for adding the returned entry to `this.active`.
@@ -280,7 +320,7 @@ export class SessionManager {
       maxCost: number | null;
       maxTurns: number | null;
     },
-    promptOverride?: string,
+    promptOverride?: string | undefined,
   ): Promise<{
     controller: AbortController;
     steeringQueue: AgentMessage[];
@@ -305,6 +345,11 @@ export class SessionManager {
       },
       signal: controller.signal,
       promptOverride,
+      takeModelSwitch: () => {
+        const pending = this.pendingModels.get(sessionId);
+        if (pending) this.pendingModels.delete(sessionId);
+        return pending ?? null;
+      },
     })
       .then((final) => {
         this.settle(sessionId, final, costGuard);

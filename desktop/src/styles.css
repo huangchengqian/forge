@@ -219,8 +219,8 @@ body {
 /* Sidebar section headers (Project / Sessions), ZCode-style. */
 .side-section-label {
   padding: 10px 10px 4px;
-  font-size: 11px; font-weight: 650; color: var(--text-muted);
-  letter-spacing: 0.06em; text-transform: uppercase;
+  font-size: 11px; font-weight: 700; color: var(--text-secondary);
+  letter-spacing: 0.08em; text-transform: uppercase;
   flex-shrink: 0;
 }
 
@@ -267,6 +267,10 @@ body {
   border-radius: var(--radius-sm); cursor: pointer; font-size: 13px;
 }
 .session-item:hover { background: var(--bg-secondary); }
+/* Delete affordance appears on hover for the selected session only. */
+.session-del { display: none; }
+.session-item:hover .session-del { display: inline-flex; color: var(--text-muted); }
+.session-item:hover .session-del:hover { color: var(--red); background: transparent; }
 .session-item.selected { background: var(--accent); }
 .session-item .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
 .session-item.selected .title { color: #fff; }

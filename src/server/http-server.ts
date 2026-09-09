@@ -101,6 +101,23 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
         return;
       }
 
+      // Mid-session model switch. Running: effective at the next turn
+      // boundary; idle: persisted for the next resume.
+      if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "model") {
+        const body = await readBody(req);
+        if (typeof body.providerId !== "string" || !body.providerId) {
+          json(res, 400, { error: "providerId is required" });
+          return;
+        }
+        try {
+          const result = await manager.switchModel(parts[1]!, body.providerId);
+          json(res, 200, result);
+        } catch (err) {
+          json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
       if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "abort") {
         const result = await manager.abort(parts[1]!);
         json(res, result.ok ? 202 : 409, result);

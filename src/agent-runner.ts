@@ -51,8 +51,11 @@ export async function runAgent(opts: {
   /** First prompt of this run. Defaults to the session goal — override with
    *  the follow-up message when continuing a completed session. */
   promptOverride?: string | undefined;
+  /** Mid-session model switch: called at each turn boundary; a non-null
+   *  return replaces the loop's model from that turn on (consumed once). */
+  takeModelSwitch?: (() => Model<any> | null) | undefined;
 }): Promise<Session> {
-  const { session, model, guardrails, signal, streamFn, promptOverride } = opts;
+  const { session, model, guardrails, signal, streamFn, promptOverride, takeModelSwitch } = opts;
 
   const tools = createCodingTools(session.workspace) ?? [];
   const context: AgentContext = {
@@ -81,6 +84,7 @@ export async function runAgent(opts: {
       sessionId: session.id,
       costGuard: guardrails.costGuard,
       emitEvent: (type, payload) => appendEvent(session.id, type as Parameters<typeof appendEvent>[1], payload),
+      takeModelSwitch,
       compact: {
         model,
         completeSimple: async (m: unknown, context: unknown, options: unknown) => {

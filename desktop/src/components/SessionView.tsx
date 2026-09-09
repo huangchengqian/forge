@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { store } from "../lib/store.ts";
+import { fetchConfig } from "../lib/api.ts";
 import { Markdown } from "./Markdown.tsx";
+import type { ProviderConfig } from "../types.ts";
 
 /** Tool call row with expandable args/result. */
 function ToolRow({ call }: { call: { toolCallId: string; toolName: string; args: unknown; result?: unknown; isError?: boolean; running: boolean } }) {
@@ -173,8 +175,28 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
   const [steerInput, setSteerInput] = useState("");
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resumeMessage, setResumeMessage] = useState("");
+  const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const running = status === "running";
   const resumable = status === "failed" || status === "cancelled";
+  // MODEL_CHANGED events override the session's original model in the UI.
+  const effectiveModelId = conversation.modelId ?? modelId;
+
+  useEffect(() => {
+    void fetchConfig()
+      .then((cfg) => setProviders(cfg.providers))
+      .catch(() => {});
+  }, []);
+
+  const onModelSwitch = async (providerId: string) => {
+    if (!providerId || providerId === effectiveModelId) return;
+    try {
+      const { switchModel } = await import("../lib/api.ts");
+      await switchModel(sessionId, providerId);
+      setProviders((ps) => [...ps]); // no-op refresh; MODEL_CHANGED drives the UI
+    } catch (err) {
+      console.error("model switch failed:", err);
+    }
+  };
 
   // One send path for all states: running steers the live loop, a completed
   // session continues as a follow-up (prompt = the message), and
@@ -347,23 +369,33 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
             />
             <div className="composer-actions" style={{ justifyContent: "space-between" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span
-                  className="chip"
-                  title="model subscription for this session"
-                  style={{ color: "var(--text)" }}
-                >
-                  ◈ {modelId}
-                </span>
-                <span className="chip" title="completion verification level for this session">
-                  trust: {trustLevel}
-                </span>
-                {!connected && (
-                  <span className="chip" title="live event stream reconnecting…">
-                    <span className="dot" style={{ background: "var(--yellow)" }} />
-                    reconnecting
-                  </span>
+              <select
+                className="composer-model-select"
+                value={providers.some((p) => p.modelId === effectiveModelId)
+                  ? providers.find((p) => p.modelId === effectiveModelId)!.id
+                  : ""}
+                onChange={(e) => void onModelSwitch(e.target.value)}
+                title="Model subscription — switching takes effect at the next turn boundary"
+              >
+                {!providers.some((p) => p.modelId === effectiveModelId) && (
+                  <option value="">{effectiveModelId || "no model"}</option>
                 )}
-              </div>
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.modelId}
+                  </option>
+                ))}
+              </select>
+              <span className="chip" title="completion verification level for this session">
+                trust: {trustLevel}
+              </span>
+              {!connected && (
+                <span className="chip" title="live event stream reconnecting…">
+                  <span className="dot" style={{ background: "var(--yellow)" }} />
+                  reconnecting
+                </span>
+              )}
+            </div>
               <button
                 className="btn btn-primary btn-small"
                 onClick={() => void send()}

@@ -52,6 +52,7 @@ const emptyConversation = (): ConversationView => ({
   stuck: null,
   compaction: null,
   resumed: null,
+  modelId: null,
 });
 
 let source: EventSource | null = null;
@@ -168,6 +169,11 @@ function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial<Deskto
         mode: String(payload.mode ?? "unknown"),
         at: env.at ?? Date.now(),
       };
+      return { conversation };
+    }
+
+    case "MODEL_CHANGED": {
+      conversation.modelId = String(payload.modelId ?? "");
       return { conversation };
     }
 

@@ -97,4 +97,6 @@ export interface ConversationView {
   compaction: { mode: string; at: number } | null;
   /** Set when the stream replays a SESSION_RESUMED marker. */
   resumed: { messagesRecovered: number } | null;
+  /** Updated by MODEL_CHANGED events (mid-session model switch). */
+  modelId: string | null;
 }

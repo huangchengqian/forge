@@ -311,11 +311,13 @@ Every guardrail must have a UI entry point.
 | Stuck detection | StuckWarning (pattern + suggestion) |
 | Steering | Mid-run input box |
 | Streaming | SessionView (real-time conversation) |
+| Context compaction | CompactionNotice (banner on COMPACTION event) |
 | Session management | SessionList + StatusBar |
 | Project/workspace | Sidebar + project selector |
 | Model config | SettingsPage |
+| Model switch | Composer selector (new session) + SessionView selector (mid-session) |
 | Trust level | Composer (low/medium/high selector) |
-| Abort/resume | Stop button + Resume button |
+| Abort/resume | Stop button + Resume button (completed = follow-up) |
 
 ### Rule 9.3
 

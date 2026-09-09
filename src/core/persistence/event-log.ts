@@ -25,6 +25,8 @@ export type PersistedEventType =
   // A resumed session legitimately logs SESSION_* once + AGENT_RUN_* per run.
   | "AGENT_RUN_STARTED"
   | "AGENT_RUN_ENDED"
+  // mid-session model switch (POST /sessions/:id/model)
+  | "MODEL_CHANGED"
   | "TURN_STARTED"
   | "TURN_ENDED"
   | "MESSAGE_STARTED"
