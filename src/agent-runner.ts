@@ -48,8 +48,11 @@ export async function runAgent(opts: {
   /** LLM streaming function: Pi's streamSimple wrapped with the subscription key,
    *  or a scripted mock in smoke tests. */
   streamFn: Parameters<typeof agentLoop>[4];
+  /** First prompt of this run. Defaults to the session goal — override with
+   *  the follow-up message when continuing a completed session. */
+  promptOverride?: string | undefined;
 }): Promise<Session> {
-  const { session, model, guardrails, signal, streamFn } = opts;
+  const { session, model, guardrails, signal, streamFn, promptOverride } = opts;
 
   const tools = createCodingTools(session.workspace) ?? [];
   const context: AgentContext = {
@@ -93,7 +96,11 @@ export async function runAgent(opts: {
   }
 
   const prompts: AgentMessage[] = [
-    { role: "user", content: [{ type: "text", text: session.goal }], timestamp: Date.now() },
+    {
+      role: "user",
+      content: [{ type: "text", text: promptOverride ?? session.goal }],
+      timestamp: Date.now(),
+    },
   ];
 
   const stream = agentLoop(prompts, context, config, signal, streamFn);

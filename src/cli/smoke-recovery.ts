@@ -179,16 +179,22 @@ async function main(): Promise<void> {
       }`,
     );
 
-    // 6. resume() on a session that is now completed → must throw with the
-    //    "cannot be resumed (status=...)" reason (resumable whitelist check).
-    let blocked = false;
+    // 6. resume() on a completed session is now a chat-style follow-up
+    //    (2026-09-09): it must NOT be blocked — the follow-up relaunches the
+    //    loop with the message as the prompt. Verify it flips the session
+    //    back to running (then it settles again).
+    let followed = false;
     try {
       await manager.resume(sessionId);
+      // give the relaunch a beat to reach the loop
+      await new Promise((r) => setTimeout(r, 300));
+      const after = await loadSession(sessionId);
+      followed = after?.status === "running" || after?.status === "completed";
     } catch (err) {
-      blocked = /cannot be resumed/i.test(String(err));
+      console.log("  follow-up resume threw:", String(err));
     }
-    ok = ok && blocked;
-    console.log(`  resume on completed session: ${blocked ? "OK" : "FAIL"}`);
+    ok = ok && followed;
+    console.log(`  follow-up resume on completed session: ${followed ? "OK" : "FAIL"}`);
 
     // Wait for the in-flight agent to finish before exit.
     await resumeP;

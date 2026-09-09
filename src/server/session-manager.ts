@@ -25,11 +25,18 @@ type ActiveEntry = {
 };
 
 /**
- * Sessions in these terminal states can be resumed via `resume()`. `running`
- * is forbidden (would double-write the event log); `completed` is not yet
- * supported (PM decided to defer).
+ * Sessions in these terminal states can be resumed. `running` is forbidden
+ * (would double-write the event log).
+ *
+ * `completed` follow-ups (2026-09-09, PM via real-use acceptance): a
+ * finished session must accept a follow-up message and continue the loop —
+ * chat-style continuation. `failed`/`cancelled` retry the goal.
  */
-const RESUMABLE_STATUSES: ReadonlySet<SessionStatus> = new Set(["failed", "cancelled"]);
+const RESUMABLE_STATUSES: ReadonlySet<SessionStatus> = new Set([
+  "failed",
+  "cancelled",
+  "completed",
+]);
 
 export class SessionManager {
   private active = new Map<string, ActiveEntry>();
@@ -147,10 +154,13 @@ export class SessionManager {
       throw new Error(`session ${sessionId} not found`);
     }
 
-    // 2. Status whitelist.
+    // 2. Status whitelist. Remember the prior state: a `completed` resume is
+    // a chat-style follow-up (prompt = the new message); `failed`/`cancelled`
+    // is a retry (prompt = the goal).
+    const priorStatus = session.status;
     if (!RESUMABLE_STATUSES.has(session.status)) {
       throw new Error(
-        `session ${sessionId} cannot be resumed (status=${session.status}; only failed/cancelled are resumable)`,
+        `session ${sessionId} cannot be resumed (status=${session.status}; only failed/cancelled/completed are resumable)`,
       );
     }
 
@@ -207,7 +217,13 @@ export class SessionManager {
     );
     costGuard.hydrate(session.cost.total);
 
-    // 9. Launch (re-uses helper).
+    // 9. Launch (re-uses helper). Semantics by prior state:
+    //   - failed/cancelled → retry: prompt = goal, message rides the
+    //     steering queue as corrective guidance.
+    //   - completed → follow-up: prompt = the message itself (the goal is
+    //     already in the replayed history; re-sending it would re-run the
+    //     finished task).
+    const wasCompleted = priorStatus === "completed";
     const launchOpts = {
       trustLevel: session.trustLevel,
       criteria: session.completionCriteria,
@@ -220,10 +236,12 @@ export class SessionManager {
       subscription,
       costGuard,
       launchOpts,
+      wasCompleted ? opts?.message : undefined,
     );
 
-    // 10. Push steering message now that steeringQueue exists.
-    if (opts?.message) {
+    // 10. Push steering message now that steeringQueue exists (retry path
+    // only — completed follow-ups ride as the prompt, see above).
+    if (opts?.message && !wasCompleted) {
       steeringQueue.push({
         role: "user",
         content: [{ type: "text", text: opts.message }],
@@ -246,6 +264,11 @@ export class SessionManager {
    * Launch the agent loop on a (possibly recovered) session. Shared by
    * `create()` and `resume()`. The caller owns the CostGuard's lifetime and
    * is responsible for adding the returned entry to `this.active`.
+   *
+   * `promptOverride`: when a completed session is continued with a
+   * follow-up message, that message — not the original goal — is the new
+   * turn's prompt (the goal already lives in the replayed history; re-sending
+   * it would make the model re-run the finished task).
    */
   private async launchAgent(
     session: Session,
@@ -257,6 +280,7 @@ export class SessionManager {
       maxCost: number | null;
       maxTurns: number | null;
     },
+    promptOverride?: string,
   ): Promise<{
     controller: AbortController;
     steeringQueue: AgentMessage[];
@@ -280,6 +304,7 @@ export class SessionManager {
         costGuard,
       },
       signal: controller.signal,
+      promptOverride,
     })
       .then((final) => {
         this.settle(sessionId, final, costGuard);

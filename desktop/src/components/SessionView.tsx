@@ -152,12 +152,13 @@ function EmptyConversation() {
   );
 }
 
-export function SessionView({ sessionId, goal, status, failureReason, modelId }: {
+export function SessionView({ sessionId, goal, status, failureReason, modelId, trustLevel }: {
   sessionId: string;
   goal: string;
   status: string;
   failureReason: string | null;
   modelId: string;
+  trustLevel: string;
 }) {
   const conversation = store((s) => s.conversation);
   const connected = store((s) => s.connected);
@@ -174,6 +175,28 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId }:
   const [resumeMessage, setResumeMessage] = useState("");
   const running = status === "running";
   const resumable = status === "failed" || status === "cancelled";
+
+  // One send path for all states: running steers the live loop, a completed
+  // session continues as a follow-up (prompt = the message), and
+  // failed/cancelled retries (message optional — empty retries the goal).
+  const send = async () => {
+    const text = steerInput.trim();
+    if (running) {
+      if (!text) return;
+      await steer(text);
+      setSteerInput("");
+      return;
+    }
+    if (status === "completed") {
+      if (!text) return;
+      await resume(text);
+      setSteerInput("");
+      return;
+    }
+    await resume(text || undefined);
+    setSteerInput("");
+  };
+  const canSend = running || status === "completed" ? !!steerInput.trim() : true;
 
   const endRef = (el: HTMLDivElement | null) => {
     el?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -300,38 +323,56 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId }:
       )}
 
       <div style={{ borderTop: "1px solid var(--border)", padding: "12px 28px 16px" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", gap: 8, alignItems: "center" }}>
-          <span
-            className="chip"
-            title={connected ? "live event stream connected" : "reconnecting…"}
-          >
-            <span
-              className="dot"
-              style={{ background: connected ? "var(--green)" : "var(--yellow)" }}
-            />
-            {connected ? "live" : "reconnecting"}
-          </span>
-          <span
-            className="chip"
-            title="model subscription for this session"
-            style={{ color: "var(--text)" }}
-          >
-            ◈ {modelId}
-          </span>
-          <input
-            className="input"
-            style={{ flex: 1 }}
-            placeholder={running ? "Steer: type to redirect the agent at the next turn boundary…" : "Session ended"}
-            disabled={!running}
-            value={steerInput}
-            onChange={(e) => setSteerInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && steerInput.trim()) {
-                void steer(steerInput.trim());
-                setSteerInput("");
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+          <div className="composer-box" style={{ padding: "10px 12px 8px" }}>
+            <textarea
+              className="composer-ta"
+              rows={2}
+              placeholder={
+                running
+                  ? "Steer the agent at the next turn boundary…  (Enter to send)"
+                  : status === "completed"
+                    ? "Reply to continue this conversation…  (Enter to send)"
+                    : "Describe what to change, or press Enter to retry the task…"
               }
-            }}
-          />
+              disabled={!running && !resumable && status !== "completed"}
+              value={steerInput}
+              onChange={(e) => setSteerInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (canSend) void send();
+                }
+              }}
+            />
+            <div className="composer-actions" style={{ justifyContent: "space-between" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span
+                  className="chip"
+                  title="model subscription for this session"
+                  style={{ color: "var(--text)" }}
+                >
+                  ◈ {modelId}
+                </span>
+                <span className="chip" title="completion verification level for this session">
+                  trust: {trustLevel}
+                </span>
+                {!connected && (
+                  <span className="chip" title="live event stream reconnecting…">
+                    <span className="dot" style={{ background: "var(--yellow)" }} />
+                    reconnecting
+                  </span>
+                )}
+              </div>
+              <button
+                className="btn btn-primary btn-small"
+                onClick={() => void send()}
+                disabled={!canSend}
+              >
+                {running ? "Send ↵" : status === "completed" ? "Send ↵" : "Retry ↵"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
