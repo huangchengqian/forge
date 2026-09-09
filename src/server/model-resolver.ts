@@ -1,7 +1,31 @@
-import { streamSimple } from "@earendil-works/pi-ai/compat";
+import { streamSimple, getModels, getProviders } from "@earendil-works/pi-ai/compat";
 import type { Model } from "@earendil-works/pi-ai";
 import { agentLoop } from "@earendil-works/pi-agent-core";
 import type { ProviderConfig } from "./config-store.ts";
+
+/**
+ * Look up a model in Pi's built-in catalog by id (protocol as a tiebreaker
+ * when several providers ship the same model id). Returns real pricing,
+ * context window, and reasoning flag — without this, CostGuard sees zero
+ * cost on every real provider and the budget guard is decorative.
+ */
+function lookupBuiltinModel(modelId: string, api?: string): Model<any> | null {
+  for (const provider of getProviders()) {
+    for (const model of getModels(provider as never) as unknown as Model<any>[]) {
+      if (model.id !== modelId) continue;
+      if (api && model.api === api) return model;
+      if (!api) return model;
+    }
+  }
+  // Second pass: same model id under a different protocol still has valid
+  // pricing (e.g. an openai-completions id served over anthropic-messages).
+  for (const provider of getProviders()) {
+    for (const model of getModels(provider as never) as unknown as Model<any>[]) {
+      if (model.id === modelId) return model;
+    }
+  }
+  return null;
+}
 
 /**
  * Build a pi-ai Model object from a Forge subscription. The subscription's
@@ -9,17 +33,23 @@ import type { ProviderConfig } from "./config-store.ts";
  * makeStreamFnWithKey) so keys never land in persisted session data.
  */
 export function buildModel(subscription: ProviderConfig): Model<any> {
+  const catalog = lookupBuiltinModel(subscription.modelId, subscription.api);
+  if (!catalog) {
+    console.warn(
+      `[forge] model "${subscription.modelId}" not in Pi catalog — cost guard will see $0 (pricing unknown)`,
+    );
+  }
   return {
     id: subscription.modelId,
-    name: subscription.modelId,
+    name: catalog?.name ?? subscription.modelId,
     api: subscription.api,
     provider: subscription.id,
     baseUrl: subscription.baseUrl,
-    reasoning: /claude|gpt-5|deepseek|o[1345]/i.test(subscription.modelId),
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128_000,
-    maxTokens: 8_192,
+    reasoning: catalog?.reasoning ?? /claude|gpt-5|deepseek|o[1345]/i.test(subscription.modelId),
+    input: catalog?.input ?? ["text"],
+    cost: catalog?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: catalog?.contextWindow ?? 128_000,
+    maxTokens: catalog?.maxTokens ?? 8_192,
   } as unknown as Model<any>;
 }
 
