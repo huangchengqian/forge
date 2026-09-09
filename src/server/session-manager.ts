@@ -100,6 +100,7 @@ export class SessionManager {
       guardrails: {
         sessionId,
         workspace,
+        session,
         completion: {
           trustLevel,
           criteria: input.criteria ?? [],

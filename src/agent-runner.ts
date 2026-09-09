@@ -12,6 +12,7 @@ import { mapAgentEventToPersisted } from "./events/mapper.ts";
 import { makeBeforeToolCall } from "./guardrails/before-tool-call.ts";
 import { makeAfterToolCall } from "./guardrails/after-tool-call.ts";
 import { makeTransformContext } from "./guardrails/transform-context.ts";
+import { makeShouldStopAfterTurn } from "./guardrails/should-stop-after-turn.ts";
 import type { GuardrailConfig } from "./guardrails/types.ts";
 import type { Session } from "./types.ts";
 
@@ -66,6 +67,7 @@ export async function runAgent(opts: {
   if (guardrails) {
     config.beforeToolCall = makeBeforeToolCall(guardrails);
     config.afterToolCall = makeAfterToolCall(guardrails);
+    config.shouldStopAfterTurn = makeShouldStopAfterTurn(guardrails);
     config.getSteeringMessages = async () => guardrails.steeringQueue.splice(0);
   }
 
