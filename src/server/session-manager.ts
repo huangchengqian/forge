@@ -1,5 +1,4 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { EventBus } from "../events/event-bus.ts";
 import { runAgent } from "../agent-runner.ts";
 import { appendEvent } from "../core/persistence/event-log.ts";
 import { replaySession } from "../core/persistence/replay.ts";
@@ -38,7 +37,6 @@ export class SessionManager {
 
   constructor(
     private readonly opts: {
-      bus: EventBus;
       forgeHome: string;
       projects: ProjectsRegistry;
       approvalHub: ApprovalHub;
@@ -282,12 +280,6 @@ export class SessionManager {
         costGuard,
       },
       signal: controller.signal,
-      onEvent: () => this.opts.bus.publish({
-        type: "session_started",
-        sessionId,
-        goal: session.goal,
-        at: Date.now(),
-      }),
     })
       .then((final) => {
         this.settle(sessionId, final, costGuard);

@@ -1,7 +1,6 @@
 import {
   agentLoop,
   type AgentContext,
-  type AgentEvent,
   type AgentLoopConfig,
   type AgentMessage,
 } from "@earendil-works/pi-agent-core";
@@ -37,8 +36,9 @@ function buildSystemPrompt(session: Session): string {
 /**
  * Run Pi's agentLoop in-process with Forge guardrails injected as hooks.
  * Every event is consumed: mapped into the FIFO event log (persistence +
- * SSE source of truth), optionally streamed to the caller, and usage is fed
- * into the cost guard.
+ * SSE source of truth), and usage is fed into the cost guard. Control-plane
+ * events fan out from the event log to the in-process EventBus automatically
+ * — see appendEvent().
  */
 export async function runAgent(opts: {
   session: Session;
@@ -48,9 +48,8 @@ export async function runAgent(opts: {
   /** LLM streaming function: Pi's streamSimple wrapped with the subscription key,
    *  or a scripted mock in smoke tests. */
   streamFn: Parameters<typeof agentLoop>[4];
-  onEvent?: (event: AgentEvent) => void;
 }): Promise<Session> {
-  const { session, model, guardrails, signal, streamFn, onEvent } = opts;
+  const { session, model, guardrails, signal, streamFn } = opts;
 
   const tools = createCodingTools(session.workspace) ?? [];
   const context: AgentContext = {
@@ -87,7 +86,6 @@ export async function runAgent(opts: {
   const stream = agentLoop(prompts, context, config, signal, streamFn);
 
   for await (const event of stream) {
-    onEvent?.(event);
     const mapped = mapAgentEventToPersisted(event);
     if (mapped) {
       await appendEvent(session.id, mapped.type, mapped.payload);

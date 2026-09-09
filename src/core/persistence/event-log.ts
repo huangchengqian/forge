@@ -1,6 +1,9 @@
 import { mkdir, readFile, appendFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import type { EventBus } from "../../events/event-bus.ts";
+import { defaultBus } from "../../events/event-bus.ts";
+import type { ControlEvent, ControlEventType } from "../../events/event-types.ts";
 
 export function eventsDir(): string {
   return resolve(
@@ -16,7 +19,7 @@ export type PersistedEventType =
   | "SESSION_ENDED"
   | "SESSION_FAILED"
   | "SESSION_CANCELLED"
-  // agent loop
+  // agent loop (data plane — high frequency, not fanned out to the bus)
   | "TURN_STARTED"
   | "TURN_ENDED"
   | "MESSAGE_STARTED"
@@ -33,8 +36,8 @@ export type PersistedEventType =
   | "STUCK_WARNING"
   // Phase 3: tool-policy boundaries (added with the EventBus collapse — see
   // docs/25 §6.2 phase 1). Payload shape:
-  //   GUARD_BLOCKED            → { toolName: string, reason: string, kind?: "guard_denied" }
-  //   GUARD_APPROVAL_REQUEST   → { requestId: string, toolName: string, kind?: "guard_approval_request" }
+  //   GUARD_BLOCKED            → { toolName: string, reason: string }
+  //   GUARD_APPROVAL_REQUEST   → { requestId: string, toolName: string }
   | "GUARD_BLOCKED"
   | "GUARD_APPROVAL_REQUEST"
   // Phase 3: trust-level-high evaluator round. Payload shape:
@@ -51,6 +54,34 @@ export type PersistedEvent = {
   at: number;
   payload: Record<string, unknown>;
 };
+
+/**
+ * Control-plane subset of PersistedEventType. These are the events that
+ * `appendEvent` fans out to the in-process EventBus after writing to disk.
+ * Data-plane events (TURN, MESSAGE, TEXT_DELTA, TOOL families) stay in the
+ * log only — high volume, not actionable as notifications.
+ */
+const CONTROL_EVENT_TYPES: ReadonlySet<PersistedEventType> = new Set<PersistedEventType>([
+  "SESSION_CREATED",
+  "SESSION_STARTED",
+  "SESSION_RESUMED",
+  "SESSION_ENDED",
+  "SESSION_FAILED",
+  "SESSION_CANCELLED",
+  "STEERING_QUEUED",
+  "VERIFICATION_RESULT",
+  "COST_UPDATE",
+  "STUCK_WARNING",
+  "GUARD_BLOCKED",
+  "GUARD_APPROVAL_REQUEST",
+  "EVALUATION_COMPLETED",
+  "COMPACTION",
+  "COMPACTION_FAILED",
+]);
+
+export function isControlEvent(type: PersistedEventType): type is ControlEventType {
+  return CONTROL_EVENT_TYPES.has(type);
+}
 
 function eventFile(taskId: string): string {
   return join(eventsDir(), `${taskId}.events.jsonl`);
@@ -71,9 +102,24 @@ function eventFile(taskId: string): string {
  */
 const appendQueues = new Map<string, Promise<unknown>>();
 
-export function appendEvent(taskId: string, type: PersistedEventType, payload: Record<string, unknown>): Promise<PersistedEvent> {
+/**
+ * Append a control- or data-plane event to the task's JSONL log, then
+ * fan out to the control-plane bus if applicable. The bus is a pure
+ * fan-out of the persisted event — same id, same type, same payload, same
+ * timestamp. Subscribers receive the exact event that lives in the log.
+ *
+ * Fan-out failures are isolated: a throwing listener does not affect the
+ * append result or the FIFO chain.
+ */
+export function appendEvent(
+  taskId: string,
+  type: PersistedEventType,
+  payload: Record<string, unknown>,
+  opts?: { bus?: EventBus },
+): Promise<PersistedEvent> {
+  const bus = opts?.bus ?? defaultBus;
   const prev = appendQueues.get(taskId) ?? Promise.resolve();
-  const run = prev.then(() => appendEventNow(taskId, type, payload));
+  const run = prev.then(() => appendEventNow(taskId, type, payload, bus));
   // Keep the chain alive (and the map bounded) even if an append fails.
   const queued = run.catch(() => {});
   appendQueues.set(taskId, queued);
@@ -83,7 +129,12 @@ export function appendEvent(taskId: string, type: PersistedEventType, payload: R
   return run;
 }
 
-async function appendEventNow(taskId: string, type: PersistedEventType, payload: Record<string, unknown>): Promise<PersistedEvent> {
+async function appendEventNow(
+  taskId: string,
+  type: PersistedEventType,
+  payload: Record<string, unknown>,
+  bus: EventBus,
+): Promise<PersistedEvent> {
   await mkdir(eventsDir(), { recursive: true });
   const event: PersistedEvent = {
     id: randomUUID(),
@@ -93,6 +144,14 @@ async function appendEventNow(taskId: string, type: PersistedEventType, payload:
     payload,
   };
   await appendFile(eventFile(taskId), JSON.stringify(event) + "\n", "utf8");
+
+  // Fan out to the control-plane bus (data-plane events stop at the log).
+  // Bus publish errors are caught inside EventBus.publish — they cannot
+  // break the append chain.
+  if (isControlEvent(type)) {
+    bus.publish(event as ControlEvent);
+  }
+
   return event;
 }
 

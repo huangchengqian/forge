@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { EventBus } from "../events/event-bus.ts";
 import { EVENT_PROTOCOL_VERSION, TaskEventStream } from "./event-stream.ts";
 import { eventsDir } from "../core/persistence/event-log.ts";
 import { ApprovalHub } from "./approval-hub.ts";
@@ -24,11 +23,9 @@ export type ForgeServerHandle = {
 
 export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeServerHandle> {
   const host = opts.host ?? "127.0.0.1";
-  const bus = new EventBus();
-  void bus.subscribe(() => {}); // keep the bus alive; SSE is log-tailed
   const projects = new ProjectsRegistry(opts.forgeHome);
   const approvalHub = new ApprovalHub();
-  const manager = new SessionManager({ bus, forgeHome: opts.forgeHome, projects, approvalHub });
+  const manager = new SessionManager({ forgeHome: opts.forgeHome, projects, approvalHub });
   const token = newToken();
 
   const server: Server = createServer(async (req: IncomingMessage, res) => {

@@ -40,6 +40,7 @@ check "verification tests"    "cd $ROOT && node --import tsx --test src/verifica
 check "command policy tests"  "cd $ROOT && node --import tsx --test src/verification/command-policy.test.ts"
 check "schema tests"          "cd $ROOT && node --import tsx --test src/core/persistence/schema.test.ts"
 check "event-log order tests" "cd $ROOT && node --import tsx --test src/core/persistence/event-log-order.test.ts"
+check "event-log fanout test" "cd $ROOT && node --import tsx --test src/core/persistence/event-log-fanout.test.ts"
 check "replay tests"          "cd $ROOT && node --import tsx --test src/core/persistence/replay.test.ts"
 check "guard policy tests"    "cd $ROOT && node --import tsx --test src/guard/policy.test.ts"
 check "approval-hub tests"    "cd $ROOT && node --import tsx --test src/server/approval-hub.test.ts"

@@ -8,17 +8,11 @@
  * the streamFn to immediately emit a done event. This isolates the recovery
  * machinery from real LLM traffic.
  */
-import {
-  EventStream,
-  type AssistantMessage,
-  type AssistantMessageEvent,
-  type Model,
-} from "@earendil-works/pi-ai";
+import { EventStream, type AssistantMessage, type AssistantMessageEvent, type Model } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventBus } from "../events/event-bus.ts";
 import { ApprovalHub } from "../server/approval-hub.ts";
 import { ProjectsRegistry } from "../server/projects.ts";
 import { SessionManager } from "../server/session-manager.ts";
@@ -149,10 +143,9 @@ async function main(): Promise<void> {
     //    verifies the SessionManager plumbing: status check, replay,
     //    costGuard.hydrate, launchAgent path. We override streamFn to
     //    immediately emit done.
-    const bus = new EventBus();
     const approvalHub = new ApprovalHub();
     const projects = new ProjectsRegistry(forgeHome);
-    const manager = new SessionManager({ bus, forgeHome, projects, approvalHub });
+    const manager = new SessionManager({ forgeHome, projects, approvalHub });
 
     // Patch runAgent by calling resume() and racing with abort — we want
     // to observe that resume reaches the message-recovery stage, not that
