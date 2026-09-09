@@ -32,7 +32,7 @@ The core value of Forge is:
 
 ## 3. Architecture Principle
 
-Two layers, clean boundary.
+Two layers, one codebase.
 
 ## Agent Layer (Forge)
 
@@ -54,13 +54,21 @@ Responsible for:
 - context compaction
 - extension system
 
-The boundary:
+The seam:
 
 ```
 Forge (guardrails) → AgentLoopConfig hooks → Pi (agent loop)
 ```
 
 Forge injects guardrails as callbacks. Pi owns the loop. One loop, not two.
+
+### Pi is vendored — part of this monolith
+
+Pi is committed into this repo (`pi/`), directly modifiable, upstream optional. The Forge/Pi seam above is a convenience, not a wall.
+
+- When Pi's internals are the cheaper path, modify Pi directly instead of building adapters in Forge (precedent: the `<think>` leak fix in Pi's openai-completions protocol).
+- Keep `pi/` edits concentrated and recorded in docs, so optional upstream sync stays affordable. This is economics, not ideology.
+- Keep Pi's own test suites green — Pi's internal coherence protects the 300k+ lines we depend on.
 
 ## Monolith Principle
 
@@ -100,20 +108,22 @@ If Pi has it, use it. Don't rebuild.
 
 ### Rule 4.3
 
-Forge core does not import Pi internals beyond the published package API.
+Prefer the published package API. Crossing into Pi internals is allowed when it is the cheaper path — the seam is a convenience, not a wall.
 
-Allowed:
+Preferred:
 
 ```
 import { agentLoop } from "@earendil-works/pi-agent-core"
 import type { AgentLoopConfig, AgentContext } from "@earendil-works/pi-agent-core"
 ```
 
-Forbidden:
+Also allowed: modifying `pi/` source directly, or importing Pi internals, when the alternative is building an adapter layer in Forge. Precedent: the `<think>` leak fix was made inside `pi/`.
 
-```
-import { someInternalFunction } from "@earendil-works/pi-agent-core/src/internals"
-```
+Discipline for crossing (economics, not purity):
+
+- Keep `pi/` edits concentrated and recorded in a docs note.
+- Keep Pi's own tests green after edits.
+- Track one vendored copy — do not fork Pi's architecture.
 
 ---
 
