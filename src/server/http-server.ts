@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { randomUUID } from "node:crypto";
 import { EventBus } from "../events/event-bus.ts";
 import { EVENT_PROTOCOL_VERSION, TaskEventStream } from "./event-stream.ts";
 import { eventsDir } from "../core/persistence/event-log.ts";
@@ -253,6 +252,3 @@ async function readBody(req: IncomingMessage): Promise<Record<string, any>> {
     req.on("error", () => resolveP({}));
   });
 }
-
-// keep randomUUID referenced for future request ids (auth uses newToken)
-void randomUUID;

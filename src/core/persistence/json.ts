@@ -14,7 +14,7 @@ export async function readJsonFile<T>(path: string): Promise<T> {
 export async function writeJsonFileAtomic(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   // UUID suffix: pid+ms collides when two saves race in the same
-  // millisecond (orchestrator save vs a control-plane save), and the first
+  // millisecond (agent-runner save vs a control-plane save), and the first
   // rename would consume the second's tmp file (ENOENT, task file lost).
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tmp, JSON.stringify(value, null, 2) + "\n", "utf8");

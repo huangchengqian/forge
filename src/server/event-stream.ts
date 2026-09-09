@@ -15,7 +15,7 @@ type LineSink = (env: EventEnvelope) => void;
 /**
  * Event Protocol v1 stream for one task.
  *
- * Source of truth is the append-only JSONL log written by the orchestrator.
+ * Source of truth is the append-only JSONL log written by the agent runner.
  * seq is the 1-based line number in that file — stable across reconnects and
  * process restarts, so clients can dedupe replay/live overlap by seq.
  *
