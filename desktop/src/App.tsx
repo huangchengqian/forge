@@ -69,6 +69,7 @@ export function App() {
             goal={activeSession.goal}
             status={activeSession.status}
             failureReason={activeSession.failureReason}
+            modelId={activeSession.model?.modelId ?? ""}
           />
         ) : (
           <Composer projectId={activeProjectId} />

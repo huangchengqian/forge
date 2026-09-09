@@ -259,10 +259,13 @@ export const store = create<DesktopState>((set, get) => ({
     source.onmessage = (ev) => {
       try {
         const env = JSON.parse(ev.data) as EventEnvelope;
-        if (env.type === "AGENT_EVENT" || env.type === undefined) {
-          const partial = reduceEnvelope(get(), env);
-          if (Object.keys(partial).length > 0) set(partial);
-        }
+        // First frame is the protocol hello ({protocol: 1}) — no type. Every
+        // other frame carries a PersistedEventType in `type` (TEXT_DELTA,
+        // MESSAGE_ENDED, COMPACTION, ...). Unknown types fall through the
+        // reducer's default branch harmlessly.
+        if (!env.type) return;
+        const partial = reduceEnvelope(get(), env);
+        if (Object.keys(partial).length > 0) set(partial);
       } catch {
         /* skip malformed frames */
       }

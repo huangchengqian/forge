@@ -152,11 +152,12 @@ function EmptyConversation() {
   );
 }
 
-export function SessionView({ sessionId, goal, status, failureReason }: {
+export function SessionView({ sessionId, goal, status, failureReason, modelId }: {
   sessionId: string;
   goal: string;
   status: string;
   failureReason: string | null;
+  modelId: string;
 }) {
   const conversation = store((s) => s.conversation);
   const connected = store((s) => s.connected);
@@ -309,6 +310,13 @@ export function SessionView({ sessionId, goal, status, failureReason }: {
               style={{ background: connected ? "var(--green)" : "var(--yellow)" }}
             />
             {connected ? "live" : "reconnecting"}
+          </span>
+          <span
+            className="chip"
+            title="model subscription for this session"
+            style={{ color: "var(--text)" }}
+          >
+            ◈ {modelId}
           </span>
           <input
             className="input"

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { store } from "../lib/store.ts";
-import type { TrustLevel } from "../types.ts";
+import { fetchConfig } from "../lib/api.ts";
+import type { ProviderConfig, TrustLevel } from "../types.ts";
 
 /** Parse the compact criteria syntax: "file_exists:hello.txt" or
  * "file_contains:hello.txt:export" (kind:path[:pattern]). Empty → none. */
@@ -22,12 +23,22 @@ export function Composer({ projectId }: { projectId?: string | null }) {
   const [goal, setGoal] = useState("");
   const [trust, setTrust] = useState<TrustLevel>("medium");
   const [criteriaLine, setCriteriaLine] = useState("");
+  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [providerId, setProviderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void fetchConfig().then((cfg) => {
+      setProviders(cfg.providers);
+      setProviderId(cfg.defaultProviderId || cfg.providers[0]?.id || null);
+    }).catch(() => {});
+  }, []);
 
   const submit = () => {
     if (!goal.trim() || loading) return;
     void createSession({
       goal: goal.trim(),
       ...(projectId ? { projectId } : {}),
+      ...(providerId ? { providerId } : {}),
       trustLevel: trust,
       ...(trust === "high" ? { criteria: parseCriteria(criteriaLine) } : {}),
     });
@@ -58,12 +69,25 @@ export function Composer({ projectId }: { projectId?: string | null }) {
           }}
         />
         <div className="composer-actions" style={{ justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, minWidth: 0 }}>
+            <select
+              className="composer-model-select"
+              value={providerId ?? ""}
+              onChange={(e) => setProviderId(e.target.value)}
+              title="Model subscription for this session"
+            >
+              {providers.length === 0 && <option value="">no subscription</option>}
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.modelId}
+                </option>
+              ))}
+            </select>
             <select
               className="composer-model-select"
               value={trust}
               onChange={(e) => setTrust(e.target.value as TrustLevel)}
-              title="low: no verification · medium: npm test · high: explicit criteria + evaluator"
+              title="low: no verification · medium: project checks · high: criteria + evaluator"
             >
               <option value="low">trust: low</option>
               <option value="medium">trust: medium</option>
@@ -72,7 +96,7 @@ export function Composer({ projectId }: { projectId?: string | null }) {
             {trust === "high" && (
               <input
                 className="input"
-                style={{ flex: 1, fontSize: 12 }}
+                style={{ flex: 1, minWidth: 120, fontSize: 12 }}
                 placeholder="criteria: file_exists:hello.txt · file_contains:hello.txt:export"
                 value={criteriaLine}
                 onChange={(e) => setCriteriaLine(e.target.value)}

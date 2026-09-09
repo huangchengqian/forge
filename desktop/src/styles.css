@@ -268,7 +268,7 @@ body {
 }
 .session-item:hover { background: var(--bg-secondary); }
 .session-item.selected { background: var(--accent); }
-.session-item .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.session-item .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
 .session-item.selected .title { color: #fff; }
 .session-item .time { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 .session-item.selected .time { color: rgba(255,255,255,0.75); }

@@ -51,6 +51,7 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 export async function createSession(input: {
   goal: string;
   projectId?: string;
+  providerId?: string;
   trustLevel: "low" | "medium" | "high";
   criteria?: Array<{ kind: string; [k: string]: unknown }>;
   maxCost?: number;
