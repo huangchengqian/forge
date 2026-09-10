@@ -1,10 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
-
-pub struct SidecarState {
-    pub child: Mutex<Option<Child>>,
-}
 
 static FORGE_HOME: OnceLock<String> = OnceLock::new();
 static SIDECAR_CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
@@ -34,7 +30,9 @@ fn forge_root() -> &'static str {
     })
 }
 
-#[derive(Serialize, Deserialize)]
+/// Shape of `~/.forge/server.json`, written by the serve process. Read once at
+/// startup to learn the auth token the frontend is injected with.
+#[derive(Deserialize)]
 pub struct Handshake {
     #[serde(rename = "protocolVersion")]
     pub protocol_version: u32,
@@ -50,7 +48,7 @@ fn sidecar_child_slot() -> &'static Mutex<Option<Child>> {
     SIDECAR_CHILD.get_or_init(|| Mutex::new(None))
 }
 
-fn spawn_sidecar(port: u16) -> Result<u32, String> {
+fn spawn_sidecar(port: u16) -> Result<(), String> {
     let serve_script = std::env::var("FORGE_SERVE_SCRIPT")
         .unwrap_or_else(|_| "src/cli/serve.ts".into());
     let root = forge_root();
@@ -88,11 +86,10 @@ fn spawn_sidecar(port: u16) -> Result<u32, String> {
         .stderr(Stdio::from(log_err))
         .spawn()
         .map_err(|e| format!("failed to spawn forge serve: {e}"))?;
-    let pid = child.id();
     if let Ok(mut guard) = sidecar_child_slot().lock() {
         *guard = Some(child);
     }
-    Ok(pid)
+    Ok(())
 }
 
 fn wait_for_handshake(timeout_ms: u64) -> Result<Handshake, String> {
@@ -123,36 +120,6 @@ fn wait_for_handshake(timeout_ms: u64) -> Result<Handshake, String> {
     }
 }
 
-fn kill_existing() -> Option<Child> {
-    match sidecar_child_slot().lock() {
-        Ok(mut guard) => guard.take(),
-        Err(_) => None,
-    }
-}
-
-#[tauri::command]
-fn get_handshake() -> Result<Handshake, String> {
-    let path = std::path::Path::new(forge_home()).join("server.json");
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| format!("failed to read handshake: {e}"))?;
-    serde_json::from_str(&raw).map_err(|e| format!("failed to parse handshake: {e}"))
-}
-
-#[tauri::command]
-fn start_sidecar() -> Result<String, String> {
-    if let Some(mut existing) = kill_existing() { let _ = existing.kill(); }
-    let pid = spawn_sidecar(0)?;
-    Ok(format!("sidecar started (pid={pid})"))
-}
-
-#[tauri::command]
-fn stop_sidecar() -> Result<String, String> {
-    match kill_existing() {
-        Some(mut child) => { let _ = child.kill(); Ok("sidecar stopped".into()) }
-        None => Ok("no sidecar running".into()),
-    }
-}
-
 pub fn run() {
     const PORT: u16 = 5300;
     if let Err(e) = spawn_sidecar(PORT) {
@@ -175,11 +142,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .manage(sidecar_child_slot())
         .append_invoke_initialization_script(&init_js)
-        .invoke_handler(tauri::generate_handler![
-            get_handshake, start_sidecar, stop_sidecar,
-        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
