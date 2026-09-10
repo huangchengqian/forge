@@ -60,6 +60,37 @@ async function main(): Promise<void> {
     console.log(`  project: ${proj.id} path=${proj.path}`);
     ok = ok && typeof proj.id === "string";
 
+    // 2b. Project switch — POST /projects/select must really flip the active
+    // project (the route used to not exist, the desktop swallowed the 404 and
+    // the picker silently reverted; docs/27 §5.4).
+    const proj2 = (await (
+      await fetch(`${base}/projects`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ path: tmpdir(), name: "second" }),
+      })
+    ).json()) as { id: string };
+    const sel = (await (
+      await fetch(`${base}/projects/select`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ id: proj2.id }),
+      })
+    ).json()) as { id: string };
+    const listed = (await (await fetch(`${base}/projects`, { headers: auth })).json()) as {
+      activeProjectId: string | null;
+    };
+    console.log(`  project select: ${sel.id} → active=${listed.activeProjectId}`);
+    ok = ok && sel.id === proj2.id && listed.activeProjectId === proj2.id;
+
+    // 2c. Selecting an unknown project is a 404, not a 500.
+    const badSel = await fetch(`${base}/projects/select`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ id: "prj_nope" }),
+    });
+    ok = ok && badSel.status === 404;
+
     // 3. Create a session (202) — the agent fails fast against :9 and is aborted.
     const created = (await (
       await fetch(`${base}/sessions`, {

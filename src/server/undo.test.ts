@@ -23,44 +23,41 @@ after(() => {
 
 describe("undo journal (non-git)", () => {
   test("journalFile + computeDiff + restoreUndo round-trip", async () => {
-    process.env.FORGE_UNDO_DIR = join(FORGE_HOME, "undo", TASK);
-    try {
-      const target = join(WS, "src", "a.ts");
-      mkdirSync(join(WS, "src"), { recursive: true });
-      writeFileSync(target, "original\n", "utf8");
+    const undoRoot = join(FORGE_HOME, "undo", TASK);
+    const target = join(WS, "src", "a.ts");
+    mkdirSync(join(WS, "src"), { recursive: true });
+    writeFileSync(target, "original\n", "utf8");
 
-      // Simulate the guard journaling a modification + a creation.
-      const mod = await journalFile(WS, "src/a.ts");
-      assert.ok(mod);
-      assert.equal(mod.action, "modified");
-      assert.ok(mod.backup && existsSync(mod.backup));
-      writeFileSync(target, "changed\n", "utf8"); // tool writes after journal
+    // Simulate the guard journaling a modification + a creation. `undoRoot`
+    // is passed explicitly — the per-session root the guardrail config carries.
+    const mod = await journalFile(undoRoot, WS, "src/a.ts");
+    assert.ok(mod);
+    assert.equal(mod.action, "modified");
+    assert.ok(mod.backup && existsSync(mod.backup));
+    writeFileSync(target, "changed\n", "utf8"); // tool writes after journal
 
-      const created = await journalFile(WS, "newfile.txt");
-      assert.ok(created);
-      assert.equal(created.action, "created");
-      assert.equal(created.backup, null);
-      writeFileSync(join(WS, "newfile.txt"), "hi\n", "utf8");
+    const created = await journalFile(undoRoot, WS, "newfile.txt");
+    assert.ok(created);
+    assert.equal(created.action, "created");
+    assert.equal(created.backup, null);
+    writeFileSync(join(WS, "newfile.txt"), "hi\n", "utf8");
 
-      const entries = await readJournal(join(FORGE_HOME, "undo", TASK));
-      assert.equal(entries.length, 2);
+    const entries = await readJournal(join(FORGE_HOME, "undo", TASK));
+    assert.equal(entries.length, 2);
 
-      const diff = await computeDiff(FORGE_HOME, TASK, WS);
-      assert.equal(diff.kind, "journal");
-      if (diff.kind === "journal") {
-        assert.equal(diff.files.length, 2);
-        const a = diff.files.find((f) => f.path === target);
-        assert.ok(a);
-        assert.equal(a.backup, true);
-      }
-
-      const undo = await restoreUndo(FORGE_HOME, TASK);
-      assert.equal(undo.restored, 2);
-      assert.equal(readFileSync(target, "utf8"), "original\n");
-      assert.equal(existsSync(join(WS, "newfile.txt")), false);
-    } finally {
-      delete process.env.FORGE_UNDO_DIR;
+    const diff = await computeDiff(FORGE_HOME, TASK, WS);
+    assert.equal(diff.kind, "journal");
+    if (diff.kind === "journal") {
+      assert.equal(diff.files.length, 2);
+      const a = diff.files.find((f) => f.path === target);
+      assert.ok(a);
+      assert.equal(a.backup, true);
     }
+
+    const undo = await restoreUndo(FORGE_HOME, TASK);
+    assert.equal(undo.restored, 2);
+    assert.equal(readFileSync(target, "utf8"), "original\n");
+    assert.equal(existsSync(join(WS, "newfile.txt")), false);
   });
 });
 

@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
+import { join } from "node:path";
 import { runAgent } from "../agent-runner.ts";
 import { appendEvent } from "../core/persistence/event-log.ts";
 import { replaySession } from "../core/persistence/replay.ts";
@@ -11,6 +12,7 @@ import {
 } from "../core/persistence/session-store.ts";
 import { ApprovalHub } from "./approval-hub.ts";
 import { ProjectsRegistry } from "./projects.ts";
+import { captureGitHead } from "./undo.ts";
 import { buildModel, makeStreamFnWithKey, providerEnv } from "./model-resolver.ts";
 import { loadForgeConfig, resolveProvider } from "./config-store.ts";
 import type { ProviderConfig } from "./config-store.ts";
@@ -23,12 +25,38 @@ import type {
 } from "../types.ts";
 import type { SuccessCriterion } from "../core/types/criterion.ts";
 
-type ActiveEntry = {
-  sessionId: string;
+/**
+ * Everything that exists only while one run of a session is live. The
+ * SessionManager used to keep five parallel per-session maps (active / idle /
+ * pendingModels / pendingThinking / completions); they are now fields on this
+ * one object so a runtime can be registered and dropped as a unit — no map to
+ * forget, no entry to leak.
+ */
+type SessionRuntime = {
   runPromise: Promise<Session>;
   controller: AbortController;
   steeringQueue: AgentMessage[];
   costGuard: import("../guardrails/cost-guard.ts").CostGuard;
+  /**
+   * Live completion config — the *same object* handed to the guardrails in
+   * `launchAgent`. `makeShouldStopAfterTurn` re-reads `config.completion` at
+   * every turn boundary, so mutating `trustLevel` here takes effect on the
+   * next turn without a new hook or a relaunch.
+   */
+  completion: CompletionConfig;
+  /**
+   * Mid-session model switch: `switchModel()` parks a pre-built Model here;
+   * the prepareNextTurn hook picks it up at the next turn boundary and hands
+   * it to Pi's loop (AgentLoopTurnUpdate.model). Consumed at most once.
+   */
+  pendingModel: Model<any> | null;
+  /**
+   * Mid-session thinking-level switch: mirrors `pendingModel` — parked by
+   * `switchThinking()`, returned by the prepareNextTurn hook as
+   * `AgentLoopTurnUpdate.thinkingLevel` at the next turn boundary. Consumed
+   * at most once.
+   */
+  pendingThinking: ThinkingLevel | null;
 };
 
 /**
@@ -46,29 +74,14 @@ const RESUMABLE_STATUSES: ReadonlySet<SessionStatus> = new Set([
 ]);
 
 export class SessionManager {
-  private active = new Map<string, ActiveEntry>();
-  private idle = new Map<string, ActiveEntry>();
   /**
-   * Mid-session model switches, keyed by sessionId. `switchModel()` parks a
-   * pre-built Model here; the prepareNextTurn hook picks it up at the next
-   * turn boundary and hands it to Pi's loop (AgentLoopTurnUpdate.model).
-   * Consumed at most once per switch.
+   * Live runtimes, keyed by sessionId. Exactly one entry per *running* run:
+   * registered by `launchAgent`, removed on settle/failure. An idle session
+   * has no runtime — its state is the persisted Session record. (The old
+   * design also parked settled entries in an `idle` map that nothing ever
+   * read — a leak; it is gone with this shape.)
    */
-  private pendingModels = new Map<string, Model<any>>();
-  /**
-   * Mid-session thinking-level switches, keyed by sessionId. Mirrors
-   * `pendingModels`: `switchThinking()` parks the level here and the
-   * prepareNextTurn hook returns it as `AgentLoopTurnUpdate.thinkingLevel` at
-   * the next turn boundary. Consumed at most once per switch.
-   */
-  private pendingThinking = new Map<string, ThinkingLevel>();
-  /**
-   * Live completion config per running session — the *same object* handed to
-   * the guardrails in `launchAgent`. `makeShouldStopAfterTurn` re-reads
-   * `config.completion` at every turn boundary, so mutating `trustLevel` here
-   * takes effect on the next turn without a new hook or a relaunch.
-   */
-  private completions = new Map<string, CompletionConfig>();
+  private runtimes = new Map<string, SessionRuntime>();
 
   constructor(
     private readonly opts: {
@@ -133,11 +146,16 @@ export class SessionManager {
     await saveSession(session);
     await appendEvent(sessionId, "SESSION_CREATED", { goal: session.goal, workspace });
 
-    // 4. Guardrails + launch.
+    // 4. Undo baseline: record the workspace HEAD before the agent runs so the
+    //    Diff/Undo surface can show `git diff <head>` (best-effort; no-op in a
+    //    non-git workspace, which falls back to the journal).
+    await captureGitHead(this.opts.forgeHome, sessionId, workspace).catch(() => {});
+
+    // 5. Guardrails + launch (launchAgent registers the runtime).
     const costGuard = new (await import("../guardrails/cost-guard.ts")).CostGuard(
       input.maxCost ?? null,
     );
-    const { controller, steeringQueue, runPromise } = await this.launchAgent(
+    await this.launchAgent(
       session,
       subscription,
       costGuard,
@@ -148,14 +166,6 @@ export class SessionManager {
         maxTurns: input.maxTurns ?? null,
       },
     );
-
-    this.active.set(sessionId, {
-      sessionId,
-      runPromise,
-      controller,
-      steeringQueue,
-      costGuard,
-    });
 
     return { sessionId };
   }
@@ -198,7 +208,7 @@ export class SessionManager {
     }
 
     // 3. Not already active.
-    if (this.active.has(sessionId)) {
+    if (this.runtimes.has(sessionId)) {
       throw new Error(`session ${sessionId} is already running — cannot resume concurrently`);
     }
 
@@ -256,6 +266,12 @@ export class SessionManager {
     //   - completed → follow-up: prompt = the message itself (the goal is
     //     already in the replayed history; re-sending it would re-run the
     //     finished task).
+    // Keep the baseline captured at session creation (overwrite: false) so
+    // undo still diffs against the original pre-task state after a resume.
+    await captureGitHead(this.opts.forgeHome, sessionId, session.workspace, {
+      overwrite: false,
+    }).catch(() => {});
+
     const wasCompleted = priorStatus === "completed";
     const launchOpts = {
       trustLevel: session.trustLevel,
@@ -264,7 +280,7 @@ export class SessionManager {
       maxCost: session.cost.budget,
       maxTurns: session.maxTurns,
     };
-    const { controller, steeringQueue, runPromise } = await this.launchAgent(
+    await this.launchAgent(
       session,
       subscription,
       costGuard,
@@ -272,23 +288,15 @@ export class SessionManager {
       wasCompleted ? opts?.message : undefined,
     );
 
-    // 10. Push steering message now that steeringQueue exists (retry path
+    // 10. Push steering message now that the runtime exists (retry path
     // only — completed follow-ups ride as the prompt, see above).
     if (opts?.message && !wasCompleted) {
-      steeringQueue.push({
+      this.runtimes.get(sessionId)?.steeringQueue.push({
         role: "user",
         content: [{ type: "text", text: opts.message }],
         timestamp: Date.now(),
       } as AgentMessage);
     }
-
-    this.active.set(sessionId, {
-      sessionId,
-      runPromise,
-      controller,
-      steeringQueue,
-      costGuard,
-    });
 
     return { sessionId };
   }
@@ -309,8 +317,9 @@ export class SessionManager {
       throw new Error(`no model subscription for provider "${providerId}"`);
     }
 
-    if (this.active.has(sessionId)) {
-      this.pendingModels.set(sessionId, buildModel(subscription));
+    const runtime = this.runtimes.get(sessionId);
+    if (runtime) {
+      runtime.pendingModel = buildModel(subscription);
     } else {
       const session = await loadSession(sessionId);
       if (!session) throw new Error(`session ${sessionId} not found`);
@@ -347,8 +356,10 @@ export class SessionManager {
     session.updatedAt = Date.now();
     await saveSession(session);
 
-    const live = this.completions.get(sessionId);
-    if (live) live.trustLevel = trustLevel;
+    // The running loop holds the live completion object on its runtime — the
+    // persisted write above does not reach it — so mutate that copy directly.
+    const runtime = this.runtimes.get(sessionId);
+    if (runtime) runtime.completion.trustLevel = trustLevel;
 
     await appendEvent(sessionId, "TRUST_CHANGED", { trustLevel }).catch(() => {});
     return { trustLevel };
@@ -378,9 +389,8 @@ export class SessionManager {
 
     // The running loop holds its own session object — the persisted write
     // above does not reach it — so hand the level through the pending slot.
-    if (this.active.has(sessionId)) {
-      this.pendingThinking.set(sessionId, thinkingLevel);
-    }
+    const runtime = this.runtimes.get(sessionId);
+    if (runtime) runtime.pendingThinking = thinkingLevel;
 
     await appendEvent(sessionId, "THINKING_CHANGED", { thinkingLevel }).catch(() => {});
     return { thinkingLevel };
@@ -388,8 +398,8 @@ export class SessionManager {
 
   /**
    * Launch the agent loop on a (possibly recovered) session. Shared by
-   * `create()` and `resume()`. The caller owns the CostGuard's lifetime and
-   * is responsible for adding the returned entry to `this.active`.
+   * `create()` and `resume()`. Builds and registers the SessionRuntime —
+   * callers no longer wire any maps themselves.
    *
    * `promptOverride`: when a completed session is continued with a
    * follow-up message, that message — not the original goal — is the new
@@ -402,16 +412,21 @@ export class SessionManager {
     costGuard: import("../guardrails/cost-guard.ts").CostGuard,
     completion: CompletionConfig,
     promptOverride?: string | undefined,
-  ): Promise<{
-    controller: AbortController;
-    steeringQueue: AgentMessage[];
-    runPromise: Promise<Session>;
-  }> {
-    const steeringQueue: AgentMessage[] = [];
-    const controller = new AbortController();
+  ): Promise<SessionRuntime> {
     const sessionId = session.id;
-    // Keep the live object reachable so switchTrust() can mutate it mid-run.
-    this.completions.set(sessionId, completion);
+    const runtime: SessionRuntime = {
+      runPromise: Promise.resolve(session),
+      controller: new AbortController(),
+      steeringQueue: [],
+      costGuard,
+      completion,
+      pendingModel: null,
+      pendingThinking: null,
+    };
+    // Register before the loop starts so steer/abort/switch* calls that race
+    // with the first turn find the runtime. settle()/the catch handler remove
+    // it — exactly one removal per registration, no leak.
+    this.runtimes.set(sessionId, runtime);
 
     const runPromise = runAgent({
       session,
@@ -420,30 +435,31 @@ export class SessionManager {
       guardrails: {
         sessionId,
         workspace: session.workspace,
+        undoRoot: join(this.opts.forgeHome, "undo", sessionId),
         session,
         completion,
         approval: this.opts.approvalHub,
-        steeringQueue,
+        steeringQueue: runtime.steeringQueue,
         costGuard,
       },
-      signal: controller.signal,
+      signal: runtime.controller.signal,
       promptOverride,
       takeModelSwitch: () => {
-        const pending = this.pendingModels.get(sessionId);
-        if (pending) this.pendingModels.delete(sessionId);
-        return pending ?? null;
+        const pending = runtime.pendingModel;
+        runtime.pendingModel = null;
+        return pending;
       },
       // Starts from the session's persisted level; a mid-run switch arrives
       // through takeThinkingSwitch instead.
       thinkingLevel: session.thinkingLevel,
       takeThinkingSwitch: () => {
-        const pending = this.pendingThinking.get(sessionId);
-        if (pending) this.pendingThinking.delete(sessionId);
-        return pending ?? null;
+        const pending = runtime.pendingThinking;
+        runtime.pendingThinking = null;
+        return pending;
       },
     })
       .then((final) => {
-        this.settle(sessionId, final, costGuard);
+        this.settle(sessionId, final);
         return final;
       })
       .catch(async (err) => {
@@ -454,20 +470,19 @@ export class SessionManager {
         await appendEvent(sessionId, "SESSION_FAILED", {
           reason: session.failureReason,
         }).catch(() => {});
-        this.active.delete(sessionId);
-        this.completions.delete(sessionId);
-        this.pendingThinking.delete(sessionId);
+        this.runtimes.delete(sessionId);
         throw err;
       });
 
+    runtime.runPromise = runPromise;
     void runPromise.catch(() => {});
-    return { controller, steeringQueue, runPromise };
+    return runtime;
   }
 
   async steer(sessionId: string, message: string): Promise<{ ok: boolean; message: string }> {
-    const entry = this.active.get(sessionId);
-    if (!entry) return { ok: false, message: "session is not running" };
-    entry.steeringQueue.push({
+    const runtime = this.runtimes.get(sessionId);
+    if (!runtime) return { ok: false, message: "session is not running" };
+    runtime.steeringQueue.push({
       role: "user",
       content: [{ type: "text", text: message }],
       timestamp: Date.now(),
@@ -477,9 +492,9 @@ export class SessionManager {
   }
 
   async abort(sessionId: string): Promise<{ ok: boolean; message: string }> {
-    const entry = this.active.get(sessionId);
-    if (!entry) return { ok: false, message: "session is not running" };
-    entry.controller.abort();
+    const runtime = this.runtimes.get(sessionId);
+    if (!runtime) return { ok: false, message: "session is not running" };
+    runtime.controller.abort();
     return { ok: true, message: "aborting" };
   }
 
@@ -492,7 +507,7 @@ export class SessionManager {
   }
 
   async delete(sessionId: string): Promise<{ ok: boolean; message: string }> {
-    if (this.active.has(sessionId)) {
+    if (this.runtimes.has(sessionId)) {
       return { ok: false, message: "session is running — abort it first" };
     }
     await removeSession(sessionId);
@@ -512,20 +527,19 @@ export class SessionManager {
     return { ok: this.opts.approvalHub.mark(requestId, "denied") };
   }
 
-  private settle(sessionId: string, final: Session, costGuard: ActiveEntry["costGuard"]): void {
-    const entry = this.active.get(sessionId);
-    if (entry) {
-      this.active.delete(sessionId);
-      this.idle.set(sessionId, entry);
-    }
-    // The loop is gone; drop the live reference so switchTrust() cannot mutate
-    // a config nobody reads. A resume re-registers a fresh one.
-    this.completions.delete(sessionId);
-    // Any switch parked for a turn boundary that never arrived is stale.
-    this.pendingThinking.delete(sessionId);
+  private settle(sessionId: string, final: Session): void {
+    // The runtime dies with the run: one removal drops the controller,
+    // steering queue, cost guard, live completion config and any pending
+    // switch that never got consumed at a turn boundary. (The old shape kept
+    // settled entries in an `idle` map that nothing ever read — a leak; gone.)
+    const runtime = this.runtimes.get(sessionId);
+    this.runtimes.delete(sessionId);
     const status: SessionStatus = final.failureReason ? "failed" : "completed";
     final.status = status;
-    final.cost = { ...final.cost, total: costGuard.getSpent() };
+    final.cost = {
+      ...final.cost,
+      total: runtime ? runtime.costGuard.getSpent() : final.cost.total,
+    };
     final.updatedAt = Date.now();
     void saveSession(final);
     void appendEvent(sessionId, status === "failed" ? "SESSION_FAILED" : "SESSION_ENDED", {

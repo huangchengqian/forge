@@ -107,6 +107,7 @@ async function main(): Promise<void> {
   const guardrails: GuardrailConfig = {
     sessionId,
     workspace,
+    undoRoot: join(workspace, ".forge-undo"),
     session,
     completion: { trustLevel: "medium", criteria: [], maxCost: null, maxTurns: null },
     // Simulated user: denies every approval.

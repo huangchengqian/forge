@@ -20,6 +20,12 @@ export interface ApprovalRelay {
 export interface GuardrailConfig {
   sessionId: string;
   workspace: string;
+  /**
+   * Per-session undo journal root (`<forgeHome>/undo/<sessionId>`). Explicit,
+   * not read from a process env var — the in-process loop hosts many sessions
+   * in one process, so a global cannot carry a per-session value.
+   */
+  undoRoot: string;
   /** Live session reference: the stop gate writes failureReason/lastEvaluation. */
   session: Session;
   completion: CompletionConfig;

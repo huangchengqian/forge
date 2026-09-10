@@ -96,6 +96,7 @@ export async function runGoldenTask(task: GoldenTask): Promise<TaskReport> {
     const guardrails: GuardrailConfig = {
       sessionId,
       workspace,
+      undoRoot: join(forgeHome, "undo", sessionId),
       session,
       completion: {
         trustLevel: task.trustLevel,

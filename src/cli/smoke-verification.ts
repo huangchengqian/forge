@@ -152,6 +152,7 @@ async function main(): Promise<void> {
   const guardrails: GuardrailConfig = {
     sessionId,
     workspace,
+    undoRoot: join(workspace, ".forge-undo"),
     session,
     completion: {
       trustLevel: "high",

@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { store } from "../lib/store.ts";
-import { addProject, fetchProjects, selectProject } from "../lib/api.ts";
-import type { ProjectRecord } from "../types.ts";
+import { addProject } from "../lib/api.ts";
 import type { SessionStatus } from "../types.ts";
 
 const statusColor: Record<SessionStatus, string> = {
@@ -65,21 +64,20 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
   const theme = store((s) => s.theme);
   const toggleTheme = store((s) => s.toggleTheme);
   const openSettings = store((s) => s.setSettingsOpen);
-  const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [activeProject, setActiveProject] = useState<string | null>(null);
+  // Project state lives in the store, not here: a project switch must be
+  // visible to the rest of the app (the Composer creates new sessions against
+  // it) and must survive remounts.
+  const projects = store((s) => s.projects);
+  const activeProject = store((s) => s.activeProjectId);
+  const refreshProjects = store((s) => s.refreshProjects);
+  const switchProject = store((s) => s.selectProject);
 
   useEffect(() => {
-    void fetchProjects().then((r) => {
-      setProjects(r.projects);
-      setActiveProject(r.activeProjectId);
-    }).catch(() => {});
-  }, []);
+    void refreshProjects();
+  }, [refreshProjects]);
 
   async function onSwitchProject(id: string) {
-    setActiveProject(id);
-    try {
-      await selectProject(id);
-    } catch { /* registry keeps prior state on failure */ }
+    await switchProject(id);
   }
 
   async function onAddProject() {
@@ -88,9 +86,7 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
       const picked = await open({ directory: true, multiple: false, title: "选择项目文件夹" });
       if (typeof picked !== "string" || !picked) return;
       const created = await addProject(picked);
-      setActiveProject(created.id);
-      await selectProject(created.id);
-      setProjects((await fetchProjects()).projects);
+      await switchProject(created.id);
     } catch (err) {
       console.error("add project failed:", err);
     }

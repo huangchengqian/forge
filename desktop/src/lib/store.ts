@@ -7,6 +7,7 @@ import type {
   ApprovalRecordView,
   ConversationView,
   EventEnvelope,
+  ProjectRecord,
   Session,
   ThinkingLevel,
   TrustLevel,
@@ -24,8 +25,17 @@ export interface DesktopState {
   theme: "dark" | "light";
   settingsOpen: boolean;
   diffText: string | null;
+  /**
+   * Registered projects + the active one. Lifted out of Sidebar-local state so
+   * a new session is created against the project the user actually picked
+   * (rather than whichever project the currently-open session belongs to).
+   */
+  projects: ProjectRecord[];
+  activeProjectId: string | null;
 
   refreshSessions: () => Promise<void>;
+  refreshProjects: () => Promise<void>;
+  selectProject: (id: string) => Promise<void>;
   select: (id: string | null) => void;
   createSession: (input: {
     goal: string;
@@ -424,6 +434,8 @@ export const store = create<DesktopState>((set, get) => ({
   theme: (localStorage.getItem("forge-theme") as "dark" | "light") || "dark",
   settingsOpen: false,
   diffText: null,
+  projects: [],
+  activeProjectId: null,
 
   refreshSessions: async () => {
     const { fetchSessions } = await import("./api.ts");
@@ -432,6 +444,31 @@ export const store = create<DesktopState>((set, get) => ({
       set({ sessions, loading: false });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err), loading: false });
+    }
+  },
+
+  refreshProjects: async () => {
+    const { fetchProjects } = await import("./api.ts");
+    try {
+      const r = await fetchProjects();
+      set({ projects: r.projects, activeProjectId: r.activeProjectId });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  selectProject: async (id) => {
+    // Optimistic: the picker should feel instant; the server is the truth and
+    // a failed POST reverts via refreshProjects() below. Never swallow the
+    // error silently — that was the original bug (docs/27 §5.4).
+    set({ activeProjectId: id, error: null });
+    const { selectProject: apiSelect } = await import("./api.ts");
+    try {
+      await apiSelect(id);
+      await get().refreshProjects();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+      await get().refreshProjects();
     }
   },
 

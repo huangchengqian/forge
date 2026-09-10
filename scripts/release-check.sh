@@ -43,6 +43,7 @@ check "event-log order tests" "cd $ROOT && node --import tsx --test src/core/per
 check "event-log fanout test" "cd $ROOT && node --import tsx --test src/core/persistence/event-log-fanout.test.ts"
 check "replay tests"          "cd $ROOT && node --import tsx --test src/core/persistence/replay.test.ts"
 check "guard policy tests"    "cd $ROOT && node --import tsx --test src/guard/policy.test.ts"
+check "guard wiring tests"    "cd $ROOT && node --import tsx --test src/guardrails/before-tool-call.test.ts"
 check "approval-hub tests"    "cd $ROOT && node --import tsx --test src/server/approval-hub.test.ts"
 check "undo tests"            "cd $ROOT && node --import tsx --test src/server/undo.test.ts"
 check "config-store tests"   "cd $ROOT && node --import tsx --test src/server/config-store.test.ts"

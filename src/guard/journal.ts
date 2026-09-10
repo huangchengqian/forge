@@ -22,10 +22,6 @@ export type UndoEntry = {
   at: number;
 };
 
-export function undoDir(): string | null {
-  return process.env.FORGE_UNDO_DIR ?? null;
-}
-
 function journalPath(dir: string): string {
   return join(dir, "journal.jsonl");
 }
@@ -41,10 +37,15 @@ async function exists(p: string): Promise<boolean> {
 
 /**
  * Back up a file about to be modified/created by a tool call. Returns the
- * journal entry, or null when journaling is disabled or failed.
+ * journal entry, or null when journaling is disabled (empty `undoRoot`) or
+ * failed.
  */
-export async function journalFile(cwd: string, relPath: string): Promise<UndoEntry | null> {
-  const dir = undoDir();
+export async function journalFile(
+  undoRoot: string,
+  cwd: string,
+  relPath: string,
+): Promise<UndoEntry | null> {
+  const dir = undoRoot;
   if (!dir) return null;
   const absolute = resolve(cwd, relPath);
   try {

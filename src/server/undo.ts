@@ -43,9 +43,21 @@ function gitHeadPath(forgeHome: string, taskId: string): string {
   return join(undoDir(forgeHome, taskId), "git-head");
 }
 
-/** Capture the workspace git HEAD before the agent runs (best-effort). */
-export async function captureGitHead(forgeHome: string, taskId: string, workspace: string): Promise<void> {
+/**
+ * Capture the workspace git HEAD before the agent runs (best-effort).
+ *
+ * `overwrite` defaults to true; pass false (resume) to keep the baseline
+ * captured at session creation so undo still diffs against the very first
+ * pre-task state.
+ */
+export async function captureGitHead(
+  forgeHome: string,
+  taskId: string,
+  workspace: string,
+  opts?: { overwrite?: boolean },
+): Promise<void> {
   try {
+    if (opts?.overwrite === false && (await readGitHead(forgeHome, taskId))) return;
     const head = execFileSync("git", ["-C", workspace, "rev-parse", "HEAD"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],

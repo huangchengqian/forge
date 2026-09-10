@@ -284,6 +284,20 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
         return;
       }
 
+      // Switch the active project. The desktop's project picker posts here;
+      // without this route the request 404s and the picker silently reverts
+      // (the UI used to swallow the error). See docs/27 §5.4.
+      if (req.method === "POST" && url.pathname === "/projects/select") {
+        const body = await readBody(req);
+        const id = typeof body.id === "string" ? body.id : "";
+        try {
+          json(res, 200, await projects.select(id));
+        } catch (err) {
+          json(res, 404, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
       json(res, 404, { error: "not found" });
     } catch (err) {
       json(res, 500, { error: err instanceof Error ? err.message : String(err) });

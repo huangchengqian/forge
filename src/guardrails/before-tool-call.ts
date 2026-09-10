@@ -2,7 +2,7 @@ import type {
   BeforeToolCallContext,
   BeforeToolCallResult,
 } from "@earendil-works/pi-agent-core";
-import { evaluateToolCall, loadPolicy } from "../guard/policy.ts";
+import { evaluateToolCall, loadPolicy, defaultPolicyPath } from "../guard/policy.ts";
 import { journalFile } from "../guard/journal.ts";
 import { appendEvent } from "../core/persistence/event-log.ts";
 import type { GuardrailConfig } from "./types.ts";
@@ -27,8 +27,12 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
       unknown
     >;
 
-    // 1. Capability policy.
-    const decision = evaluateToolCall(loadPolicy(), toolName, input);
+    // 1. Capability policy. Loaded fresh each call from the user's
+    //    `guard.json` (falls back to the built-in default) so "Always allow"
+    //    rules added mid-session take effect immediately. Calling loadPolicy()
+    //    with no argument would silently use the built-in default and ignore
+    //    the user's file — see docs/27.
+    const decision = evaluateToolCall(loadPolicy(defaultPolicyPath()), toolName, input);
 
     if (decision.action === "deny") {
       await appendEvent(config.sessionId, "GUARD_BLOCKED", {
@@ -48,7 +52,7 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
       typeof input.path === "string" &&
       input.path.length > 0
     ) {
-      await journalFile(config.workspace, input.path).catch(() => {});
+      await journalFile(config.undoRoot, config.workspace, input.path).catch(() => {});
     }
 
     // 3. `ask` → approval dialog, blocking with a hard timeout.
