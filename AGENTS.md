@@ -335,12 +335,21 @@ To see the UI without launching the app, use the dev-only harness
 
 ```
 cd desktop && npm run dev
-# /preview.html?scene=<session|thinking|landing|empty|settings|replay>&theme=<dark|light>
+# /preview.html?scene=<session|thinking|landing|empty|settings|replay|notify>&theme=<dark|light>
 ```
 
 `scene=replay` folds `desktop/src/__replay.ts` — captured frames from a real
 session — through the real reducer, which is how ordering bugs are caught
 without a live run.
+
+`scene=notify&token=<token>&session=<id>` patches `document.hidden` and
+`window.Notification`, then runs a REAL SSE stream, to check the task-outcome
+notification path end to end. Notifications fire **only while the window is
+hidden**: with the window visible the outcome is already on screen (timeline
+notice, verification panel, sidebar status), so a notification would be noise.
+The server emits exactly two terminal event types — `SESSION_FAILED`, and
+`SESSION_ENDED` for everything else including cancellation, which is why
+`payload.status` (not the event type) decides the outcome.
 
 ### Rule 9.3
 

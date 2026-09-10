@@ -48,6 +48,8 @@ export interface EventEnvelope {
   /** Monotonic per-session sequence number; absent in raw log files. */
   seq?: string;
   type: string;
+  /** Session the event belongs to (present on persisted frames and log lines). */
+  taskId?: string;
   payload: {
     type?: string;
     id?: string;

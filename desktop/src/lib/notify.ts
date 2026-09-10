@@ -1,31 +1,44 @@
 /**
- * Task outcome notifications: an in-app toast (always) plus a system
- * notification where the environment allows one. In the Tauri webview the
- * Web Notification API is unavailable, so the plugin API is probed via
- * window.__TAURI_INTERNALS__ and used when present.
+ * Task-outcome notification.
+ *
+ * Scope: a finished session is already reported in place — timeline notices,
+ * the verification panel, and the sidebar status dot all update on their own.
+ * So there is deliberately no in-app toast host here; a floating toast would
+ * only restate what is on screen. This module covers the one case the
+ * conversation view cannot: the window is hidden and the user would otherwise
+ * never learn the outcome.
+ *
+ * Transport: the Tauri notification plugin (the Web Notification API is
+ * unavailable inside the webview), falling back to Web Notification in browser
+ * dev. Delivery is best-effort — a missing permission is not an error.
  */
-
-export type Toast = { id: number; title: string; body: string; tone: "ok" | "bad" | "info" };
-
-let nextToastId = 1;
-let toastSink: ((toast: Toast) => void) | null = null;
-
-/** Register the app-level toast host. */
-export function setToastSink(sink: (toast: Toast) => void): void {
-  toastSink = sink;
-}
-
-function pushToast(title: string, body: string, tone: Toast["tone"]): void {
-  toastSink?.({ id: nextToastId++, title, body, tone });
-}
 
 export type TaskOutcome = "completed" | "failed" | "cancelled";
 
-export function notifyTaskOutcome(taskId: string, goal: string, outcome: TaskOutcome): void {
-  const title = outcome === "completed" ? "Task completed" : outcome === "cancelled" ? "Task cancelled" : "Task failed";
-  const body = goal.length > 120 ? goal.slice(0, 120) + "…" : goal;
-  pushToast(title, body, outcome === "completed" ? "ok" : outcome === "cancelled" ? "info" : "bad");
-  void systemNotify(title, body);
+/**
+ * Map a session-terminal event to the outcome it reports.
+ *
+ * The server emits exactly two terminal types (src/server/session-manager.ts):
+ * SESSION_FAILED for a failed run and SESSION_ENDED for everything else. A
+ * cancelled run therefore arrives as SESSION_ENDED carrying
+ * `payload.status = "cancelled"` — `status` is the authoritative field, the
+ * event type only distinguishes failure.
+ */
+export function outcomeFromTerminal(type: string, status: unknown): TaskOutcome {
+  if (status === "completed" || status === "failed" || status === "cancelled") return status;
+  return type === "SESSION_FAILED" ? "failed" : "completed";
+}
+
+export function notifyTaskOutcome(goal: string, outcome: TaskOutcome): void {
+  const title =
+    outcome === "completed"
+      ? "Task completed"
+      : outcome === "cancelled"
+        ? "Task cancelled"
+        : "Task failed";
+  const trimmed = goal.trim();
+  const body = trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed;
+  void systemNotify(title, body || title);
 }
 
 async function systemNotify(title: string, body: string): Promise<void> {
@@ -34,7 +47,7 @@ async function systemNotify(title: string, body: string): Promise<void> {
     if (w.__TAURI_INTERNALS__) {
       const plugin = await import("@tauri-apps/plugin-notification");
       let granted = await plugin.isPermissionGranted();
-      if (!granted) granted = await plugin.requestPermission() === "granted";
+      if (!granted) granted = (await plugin.requestPermission()) === "granted";
       if (granted) plugin.sendNotification({ title, body });
       return;
     }

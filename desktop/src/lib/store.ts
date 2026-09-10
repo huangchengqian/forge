@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { getCfg } from "./api.ts";
+import { notifyTaskOutcome, outcomeFromTerminal } from "./notify.ts";
 import type {
   ApprovalRecordView,
   ConversationView,
@@ -333,9 +334,11 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
       return {};
     }
 
+    // The server emits exactly these two terminal types (session-manager.ts):
+    // SESSION_FAILED for a failed run, SESSION_ENDED for everything else —
+    // a cancelled run is SESSION_ENDED with payload.status = "cancelled".
     case "SESSION_ENDED":
-    case "SESSION_FAILED":
-    case "SESSION_CANCELLED": {
+    case "SESSION_FAILED": {
       void store.getState().refreshSessions();
       void pollApprovals();
       return {};
@@ -356,6 +359,24 @@ async function pollApprovals(): Promise<void> {
   } catch {
     /* transient */
   }
+}
+
+/**
+ * System-notify a session that just reached a terminal state — but only while
+ * the window is hidden. With the window visible the outcome is already on
+ * screen (timeline notice, verification panel, sidebar status), so a
+ * notification would be pure noise.
+ */
+function maybeNotifyOutcome(env: EventEnvelope): void {
+  if (env.type !== "SESSION_ENDED" && env.type !== "SESSION_FAILED") return;
+  if (typeof document === "undefined" || !document.hidden) return;
+  const state = store.getState();
+  // The stream is opened per session, so the active id is the fallback when a
+  // frame carries no taskId (e.g. a raw log replay).
+  const id = String(env.taskId ?? state.activeSessionId ?? "");
+  const goal = state.sessions.find((s) => s.id === id)?.goal ?? "";
+  if (!goal.trim()) return;
+  notifyTaskOutcome(goal, outcomeFromTerminal(env.type, env.payload?.status));
 }
 
 export const store = create<DesktopState>((set, get) => ({
@@ -420,6 +441,7 @@ export const store = create<DesktopState>((set, get) => ({
         }
         const partial = reduceEnvelope(get(), env);
         if (Object.keys(partial).length > 0) set(partial);
+        maybeNotifyOutcome(env);
       } catch {
         /* skip malformed frames */
       }

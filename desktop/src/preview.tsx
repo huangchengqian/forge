@@ -6,8 +6,14 @@
  * plain browser without the Tauri sidecar.
  * Open /preview.html?scene=<name>&theme=<dark|light>
  *
- * Scenes: session | thinking | landing | empty | settings
+ * Scenes: session | thinking | landing | empty | settings | replay | notify
+ *
+ * `replay` folds captured real session frames through the real reducer;
+ * `notify` additionally patches document.hidden and window.Notification and
+ * runs a REAL SSE stream, to check the task-outcome notification path —
+ * ?scene=notify&token=<token>&session=<id>
  */
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { store, reduceEnvelope } from "./lib/store.ts";
 import { initClient } from "./lib/api.ts";
@@ -240,22 +246,96 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * scene=notify — end-to-end check of the task-outcome notification path.
+ * Simulates "the window is hidden" (patched document.hidden), captures whatever
+ * window.Notification would show, and drives it with a REAL SSE stream from the
+ * sidecar — the same onmessage handler the app runs. Dev-only; not in the app
+ * bundle.   ?scene=notify&token=<token>&session=<id>
+ */
+const notifyLog: Array<{ title: string; body: string }> = [];
+
+if (scene === "notify") {
+  Object.defineProperty(document, "hidden", { get: () => true, configurable: true });
+  class CapturingNotification {
+    static permission = "granted";
+    static requestPermission = () => Promise.resolve("granted");
+    constructor(title: string, opts?: { body?: string }) {
+      notifyLog.push({ title, body: opts?.body ?? "" });
+    }
+  }
+  (window as unknown as { Notification: unknown }).Notification = CapturingNotification;
+
+  const sid = params.get("session") ?? "";
+  if (token && sid) {
+    void (async () => {
+      // Refresh first so the handler can resolve a goal for the session id.
+      await store.getState().refreshSessions();
+      store.getState().select(sid); // opens the real SSE stream
+    })();
+  }
+}
+
+function NotifyProbe() {
+  const [snap, setSnap] = useState({ sessions: 0, entries: [] as typeof notifyLog });
+  useEffect(() => {
+    const t = setInterval(
+      () => setSnap({ sessions: store.getState().sessions.length, entries: [...notifyLog] }),
+      400,
+    );
+    return () => clearInterval(t);
+  }, []);
+  const style: React.CSSProperties = {
+    position: "fixed",
+    right: 14,
+    bottom: 14,
+    zIndex: 99,
+    maxWidth: 460,
+    padding: "10px 12px",
+    borderRadius: 10,
+    font: "12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace",
+    background: "#101418",
+    color: "#d7e0ea",
+    border: "1px solid #2b3644",
+  };
+  return (
+    <div style={style}>
+      <div style={{ color: "#7d8fa3" }}>
+        notify probe · hidden={String(document.hidden)} · sessions={snap.sessions} · captured=
+        {snap.entries.length}
+      </div>
+      {snap.entries.length === 0 ? (
+        <div style={{ color: "#e0a03c" }}>no notification captured</div>
+      ) : (
+        snap.entries.map((e, i) => (
+          <div key={i}>
+            <b>{e.title}</b> — {e.body}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 const active = sessions[0]!;
 const replay = scene === "replay";
 
 createRoot(document.getElementById("root")!).render(
-  <Shell>
-    {scene === "landing" || scene === "settings" ? (
-      <Composer projectId="p1" />
-    ) : (
-      <SessionView
-        sessionId={replay ? "session_1788997972145_z1cif" : active.id}
-        goal={replay ? "你好" : active.goal}
-        status={replay ? "completed" : active.status}
-        failureReason={null}
-        modelId={replay ? "MiniMax-M2.7" : active.model.modelId}
-        trustLevel={replay ? "low" : active.trustLevel}
-      />
-    )}
-  </Shell>,
+  <>
+    <Shell>
+      {scene === "landing" || scene === "settings" ? (
+        <Composer projectId="p1" />
+      ) : (
+        <SessionView
+          sessionId={replay ? "session_1788997972145_z1cif" : active.id}
+          goal={replay ? "你好" : active.goal}
+          status={replay ? "completed" : active.status}
+          failureReason={null}
+          modelId={replay ? "MiniMax-M2.7" : active.model.modelId}
+          trustLevel={replay ? "low" : active.trustLevel}
+        />
+      )}
+    </Shell>
+    {scene === "notify" && <NotifyProbe />}
+  </>,
 );
