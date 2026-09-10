@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Forge UI preview</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #161616;
+        --bg-sidebar: #292b2d;
+        --bg-secondary: #222224;
+        --border: #333538;
+        --border-strong: #43464a;
+        --text: #ececee;
+        --text-secondary: #c9c9ce;
+        --text-muted: #8b8b92;
+        --accent: #4c8dff;
+        --green: #3fb950;
+        --red: #f85149;
+        --yellow: #d29922;
+        --error-bg: #2a0a0a;
+      }
+      [data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --bg-sidebar: #ececef;
+        --bg-secondary: #f6f8fa;
+        --border: #d0d7de;
+        --border-strong: #afb8c1;
+        --text: #1f2328;
+        --text-secondary: #424a53;
+        --text-muted: #656d76;
+        --accent: #0969da;
+        --green: #1a7f37;
+        --red: #cf222e;
+        --yellow: #9a6700;
+        --error-bg: #ffebe9;
+      }
+      body { margin: 0; background: var(--bg); }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/preview.tsx"></script>
+  </body>
+</html>

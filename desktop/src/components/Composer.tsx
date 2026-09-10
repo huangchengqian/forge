@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { store } from "../lib/store.ts";
 import { fetchConfig } from "../lib/api.ts";
 import type { ProviderConfig, TrustLevel } from "../types.ts";
@@ -32,6 +32,7 @@ export function Composer({ projectId }: { projectId?: string | null }) {
   const [criteriaLine, setCriteriaLine] = useState("");
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [providerId, setProviderId] = useState<string | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     void fetchConfig().then((cfg) => {
@@ -39,6 +40,14 @@ export function Composer({ projectId }: { projectId?: string | null }) {
       setProviderId(cfg.defaultProviderId || cfg.providers[0]?.id || null);
     }).catch(() => {});
   }, []);
+
+  // Grow with the content instead of reserving three fixed rows.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [goal]);
 
   const submit = () => {
     if (!goal.trim() || loading) return;
@@ -53,85 +62,95 @@ export function Composer({ projectId }: { projectId?: string | null }) {
     setCriteriaLine("");
   };
 
+  const activeModel = providers.find((p) => p.id === providerId)?.modelId ?? "no subscription";
+
   return (
-    <div style={{ maxWidth: 720, margin: "14vh auto 0", padding: "0 24px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
-        <span style={{ fontSize: 24, fontWeight: 750, color: "var(--text)", letterSpacing: "-0.02em" }}>
-          What should Forge do?
-        </span>
-      </div>
-      <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
-        The agent reads, writes and runs commands in your project. Completion is verified before it's called done.
-      </div>
-      <div className="composer-box" style={{ padding: "12px 14px 9px" }}>
-        <textarea
-          className="composer-ta"
-          placeholder="Describe the engineering task…"
-          value={goal}
-          rows={3}
-          autoFocus
-          onChange={(e) => setGoal(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <div className="composer-actions" style={{ justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, minWidth: 0 }}>
-            <select
-              className="composer-model-select"
-              value={providerId ?? ""}
-              onChange={(e) => setProviderId(e.target.value)}
-              title="Model subscription for this session"
-            >
-              {providers.length === 0 && <option value="">no subscription</option>}
-              {providers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.modelId}
-                </option>
-              ))}
-            </select>
-            <select
-              className="composer-model-select"
-              value={trust}
-              onChange={(e) => setTrust(e.target.value as TrustLevel)}
-              title="low: no verification · medium: project checks · high: criteria + evaluator"
-            >
-              <option value="low">trust: low</option>
-              <option value="medium">trust: medium</option>
-              <option value="high">trust: high</option>
-            </select>
-            {trust === "high" && (
-              <input
-                className="input"
-                style={{ flex: 1, minWidth: 120, fontSize: 12 }}
-                placeholder="criteria: file_exists:hello.txt · file_contains:hello.txt:export"
-                value={criteriaLine}
-                onChange={(e) => setCriteriaLine(e.target.value)}
-              />
-            )}
-          </div>
-          <button className="btn btn-primary" onClick={submit} disabled={!goal.trim() || loading}>
-            {loading ? "Starting…" : "Create  (↵)"}
-          </button>
-        </div>
-      </div>
-      {error && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 8 }}>{error}</div>}
-      <div className="suggestion-row" style={{ justifyContent: "flex-start", marginTop: 12 }}>
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s}
-            className="suggestion-chip"
-            onClick={() => {
-              setGoal(s);
-              document.querySelector<HTMLTextAreaElement>(".composer-ta")?.focus();
+    <div className="landing-wrap">
+      <div className="landing">
+        <h1 className="landing-title">What should Forge do?</h1>
+        <p className="landing-sub">
+          The agent reads, writes and runs commands in your project. Completion is
+          verified before it is called done.
+        </p>
+
+        <div className="composer-box">
+          <textarea
+            ref={taRef}
+            className="composer-ta"
+            placeholder="Describe the engineering task…"
+            value={goal}
+            rows={1}
+            autoFocus
+            onChange={(e) => setGoal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
             }}
-          >
-            {s}
-          </button>
-        ))}
+          />
+          <div className="composer-actions">
+            <div className="composer-meta">
+              <select
+                className="model-picker"
+                value={providerId ?? ""}
+                onChange={(e) => setProviderId(e.target.value)}
+                title={`Model subscription: ${activeModel}`}
+              >
+                {providers.length === 0 && <option value="">no subscription</option>}
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.modelId}
+                  </option>
+                ))}
+              </select>
+              <span className="meta-sep" aria-hidden="true">·</span>
+              <select
+                className="model-picker"
+                value={trust}
+                onChange={(e) => setTrust(e.target.value as TrustLevel)}
+                title="low: no verification · medium: project checks · high: criteria + evaluator"
+              >
+                <option value="low">trust low</option>
+                <option value="medium">trust medium</option>
+                <option value="high">trust high</option>
+              </select>
+              {trust === "high" && (
+                <>
+                  <span className="meta-sep" aria-hidden="true">·</span>
+                  <input
+                    className="input"
+                    style={{ flex: 1, minWidth: 140, fontSize: 12, padding: "3px 8px" }}
+                    placeholder="criteria: file_exists:hello.txt"
+                    value={criteriaLine}
+                    onChange={(e) => setCriteriaLine(e.target.value)}
+                  />
+                </>
+              )}
+            </div>
+            <button className="btn btn-primary btn-small" onClick={submit} disabled={!goal.trim() || loading}>
+              {loading ? "Starting…" : "Start"}
+              <span className="key-hint">↵</span>
+            </button>
+          </div>
+        </div>
+
+        {error && <div className="landing-error">{error}</div>}
+
+        <div className="landing-suggestions">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              className="suggestion-chip"
+              onClick={() => {
+                setGoal(s);
+                taRef.current?.focus();
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,261 @@
+/**
+ * UI preview harness — dev-only, not part of the app bundle.
+ *
+ * Renders the real components (Sidebar / SessionView / Composer / SettingsPage)
+ * against a seeded zustand store, so layout and typography can be inspected in a
+ * plain browser without the Tauri sidecar.
+ * Open /preview.html?scene=<name>&theme=<dark|light>
+ *
+ * Scenes: session | thinking | landing | empty | settings
+ */
+import { createRoot } from "react-dom/client";
+import { store, reduceEnvelope } from "./lib/store.ts";
+import { initClient } from "./lib/api.ts";
+import { Sidebar } from "./components/Sidebar.tsx";
+import { SessionView } from "./components/SessionView.tsx";
+import { Composer } from "./components/Composer.tsx";
+import { SettingsPage } from "./components/SettingsPage.tsx";
+import { REPLAY } from "./__replay.ts";
+import type { EventEnvelope, TimelineEntry } from "./types.ts";
+import "./styles.css";
+
+const params = new URLSearchParams(location.search);
+const scene = params.get("scene") ?? "session";
+const theme = (params.get("theme") as "dark" | "light") ?? "dark";
+document.documentElement.dataset.theme = theme;
+
+// Optional: point the preview at a live sidecar so scenes that call the API
+// (Settings, Composer's subscription list) render against real data.
+const token = params.get("token");
+if (token) initClient({ baseUrl: params.get("base") ?? "http://127.0.0.1:5300", token });
+
+const now = Date.now();
+const MIN = 60_000;
+
+const sessions = [
+  {
+    id: "s1",
+    kind: "task" as const,
+    goal: "Add a --json flag to the CLI and cover it with tests",
+    workspace: "/Users/hcq/demo",
+    projectId: "p1",
+    model: { provider: "prov-1", modelId: "MiniMax-M2.7" },
+    status: "running" as const,
+    failureReason: null,
+    cost: { total: 0.42, budget: 2 },
+    trustLevel: "medium" as const,
+    maxTurns: null,
+    createdAt: now - 40 * MIN,
+    updatedAt: now - 30_000,
+  },
+  {
+    id: "s2",
+    kind: "task" as const,
+    goal: "Refactor the event log to a FIFO per-session queue",
+    workspace: "/Users/hcq/demo",
+    projectId: "p1",
+    model: { provider: "prov-1", modelId: "MiniMax-M2.7" },
+    status: "completed" as const,
+    failureReason: null,
+    cost: { total: 1.13, budget: null },
+    trustLevel: "high" as const,
+    maxTurns: null,
+    createdAt: now - 26 * 60 * MIN,
+    updatedAt: now - 3 * 60 * MIN,
+  },
+  {
+    id: "s3",
+    kind: "conversation" as const,
+    goal: "What does the guardrail pipeline actually enforce?",
+    workspace: "/Users/hcq/demo",
+    projectId: "p1",
+    model: { provider: "prov-2", modelId: "claude-sonnet-4-5" },
+    status: "completed" as const,
+    failureReason: null,
+    cost: { total: 0.08, budget: null },
+    trustLevel: "low" as const,
+    maxTurns: null,
+    createdAt: now - 50 * 60 * MIN,
+    updatedAt: now - 40 * 60 * MIN,
+  },
+  {
+    id: "s4",
+    kind: "task" as const,
+    goal: "Fix the flaky sidecar handshake on port reuse",
+    workspace: "/Users/hcq/demo",
+    projectId: "p1",
+    model: { provider: "prov-1", modelId: "MiniMax-M2.7" },
+    status: "failed" as const,
+    failureReason: "verification failed after 3 recovery attempts",
+    cost: { total: 0.77, budget: 1 },
+    trustLevel: "medium" as const,
+    maxTurns: null,
+    createdAt: now - 5 * 24 * 60 * MIN,
+    updatedAt: now - 5 * 24 * 60 * MIN,
+  },
+  {
+    id: "s5",
+    kind: "task" as const,
+    goal: "Vendor pi via npm workspaces",
+    workspace: "/Users/hcq/demo",
+    projectId: "p1",
+    model: { provider: "prov-1", modelId: "MiniMax-M2.7" },
+    status: "completed" as const,
+    failureReason: null,
+    cost: { total: 0.55, budget: null },
+    trustLevel: "medium" as const,
+    maxTurns: null,
+    createdAt: now - 8 * 24 * 60 * MIN,
+    updatedAt: now - 8 * 24 * 60 * MIN,
+  },
+];
+
+const CODE = [
+  "export function printResult(result: RunResult, opts: { json?: boolean }) {",
+  '  if (opts.json) {',
+  '    process.stdout.write(JSON.stringify(result, null, 2) + "\\n");',
+  "    return;",
+  "  }",
+  "  renderTable(result);",
+  "}",
+].join("\n");
+
+const timeline: TimelineEntry[] = [
+  { kind: "user", id: "u1", text: "Add a --json flag to the CLI and cover it with tests" },
+  {
+    kind: "assistant",
+    id: "a1",
+    text: "I'll wire the flag through the argument parser first, then branch the output path and add tests.",
+    streaming: false,
+    thinking: false,
+  },
+  { kind: "tool", id: "tool-t1", toolCallId: "t1", toolName: "read", args: { path: "src/cli/args.ts" }, result: "ok", running: false },
+  {
+    kind: "tool",
+    id: "tool-t2",
+    toolCallId: "t2",
+    toolName: "edit",
+    args: { path: "src/cli/args.ts", oldText: "const flags = [", newText: 'const flags = ["--json",' },
+    result: "applied 1 hunk",
+    running: false,
+  },
+  {
+    kind: "assistant",
+    id: "a2",
+    text: "The flag parses now. The formatter still always renders the human table, so that needs a branch.",
+    streaming: false,
+    thinking: false,
+  },
+  { kind: "user", id: "u2", text: "keep the table output unchanged for existing callers" },
+  {
+    kind: "assistant",
+    id: "a3",
+    text: `Understood — the JSON path is additive and the table stays the default.\n\n\`\`\`ts\n${CODE}\n\`\`\`\n\nRunning the checks now.`,
+    streaming: false,
+    thinking: false,
+  },
+  { kind: "tool", id: "tool-t3", toolCallId: "t3", toolName: "bash", args: { command: "npm test -- --grep json" }, result: "3 passing", running: false },
+  {
+    kind: "tool",
+    id: "tool-t4",
+    toolCallId: "t4",
+    toolName: "bash",
+    args: { command: "npm run typecheck" },
+    result: "1 error: TS2345 in src/cli/print.ts:41",
+    isError: true,
+    running: false,
+  },
+  {
+    kind: "notice",
+    id: "n1",
+    tone: "info",
+    icon: "✦",
+    text: "Context compacted (llm-summary) — older history was summarized into a checkpoint, so the model's view of this conversation changed.",
+  },
+  {
+    kind: "tool",
+    id: "tool-t5",
+    toolCallId: "t5",
+    toolName: "edit",
+    args: { path: "src/cli/print.ts", oldText: "printResult(result)", newText: "printResult(result, { json })" },
+    running: true,
+  },
+  {
+    kind: "assistant",
+    id: "a4",
+    text: "Fixing the type error the typecheck surfaced — the call site was not updated",
+    streaming: true,
+    thinking: false,
+  },
+];
+
+const verification = [
+  { round: 1, passed: false, reason: "typecheck: TS2345 in src/cli/print.ts" },
+  { round: 2, passed: true, reason: "npm test · typecheck · 3 criteria" },
+];
+
+/** scene=replay: fold the captured frames of a real session through the real
+ *  stream reducer, so ordering bugs show up here instead of in a live run. */
+function replayConversation() {
+  let state = store.getState();
+  for (const env of REPLAY) {
+    state = { ...state, ...reduceEnvelope(state, env as EventEnvelope) };
+  }
+  return state.conversation;
+}
+
+store.setState({
+  sessions,
+  activeSessionId: scene === "landing" ? null : "s1",
+  connected: true,
+  theme,
+  conversation:
+    scene === "session"
+      ? { timeline, verification, costSpent: 0.42, costBudget: 2, modelId: null }
+      : scene === "replay"
+        ? replayConversation()
+        : scene === "thinking"
+          ? {
+              timeline: [
+                { kind: "user", id: "u1", text: "Add a --json flag to the CLI and cover it with tests" },
+                { kind: "assistant", id: "a1", text: "", streaming: true, thinking: true },
+              ] as TimelineEntry[],
+              verification: [],
+              costSpent: 0.03,
+              costBudget: 2,
+              modelId: null,
+            }
+          : { timeline: [], verification: [], costSpent: 0, costBudget: null, modelId: null },
+});
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="app-root">
+      <Sidebar onNewSession={() => {}} />
+      <main className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {children}
+      </main>
+      {scene === "settings" && <SettingsPage onClose={() => {}} />}
+    </div>
+  );
+}
+
+const active = sessions[0]!;
+const replay = scene === "replay";
+
+createRoot(document.getElementById("root")!).render(
+  <Shell>
+    {scene === "landing" || scene === "settings" ? (
+      <Composer projectId="p1" />
+    ) : (
+      <SessionView
+        sessionId={replay ? "session_1788997972145_z1cif" : active.id}
+        goal={replay ? "你好" : active.goal}
+        status={replay ? "completed" : active.status}
+        failureReason={null}
+        modelId={replay ? "MiniMax-M2.7" : active.model.modelId}
+        trustLevel={replay ? "low" : active.trustLevel}
+      />
+    )}
+  </Shell>,
+);

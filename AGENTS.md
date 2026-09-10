@@ -305,19 +305,42 @@ Every guardrail must have a UI entry point.
 | Guardrail | UI component |
 |---|---|
 | Guard ask (approval) | ApprovalDialog (real-time popup) |
-| Completion verification | VerificationPanel (criteria + pass/fail + evidence) |
-| Undo journal | DiffView + undo button |
+| Completion verification | VerificationPanel (per-run criteria + pass/fail + evidence) |
+| Undo journal | Diff panel + Undo button |
 | Cost budget | CostGauge (spent / budget) |
-| Stuck detection | StuckWarning (pattern + suggestion) |
+| Stuck detection | In-place notice in the transcript |
 | Steering | Mid-run input box |
 | Streaming | SessionView (real-time conversation) |
-| Context compaction | CompactionNotice (banner on COMPACTION event) |
+| Context compaction | In-place notice on COMPACTION |
 | Session management | SessionList + StatusBar |
 | Project/workspace | Sidebar + project selector |
 | Model config | SettingsPage |
 | Model switch | Composer selector (new session) + SessionView selector (mid-session) |
 | Trust level | Composer (low/medium/high selector) |
 | Abort/resume | Stop button + Resume button (completed = follow-up) |
+
+The transcript is **one ordered timeline**, not parallel message/tool arrays.
+
+The server streams a strictly ordered event log (`MESSAGE_STARTED` → `TEXT_DELTA`* →
+`MESSAGE_ENDED`, with `TOOL_CALL` interleaved). `store.ts` folds it in order into
+`ConversationView.timeline`; folding out of order loses both the position of tool
+calls and the order of prompts across turns. Two invariants:
+
+- Entry ids come from Pi's `message.timestamp` (stable), so replay is idempotent.
+- A `seq` watermark drops frames already folded — the server has no
+  `Last-Event-ID` support, so an SSE reconnect replays the log from the start.
+
+To see the UI without launching the app, use the dev-only harness
+(`desktop/preview.html`, not part of the vite build):
+
+```
+cd desktop && npm run dev
+# /preview.html?scene=<session|thinking|landing|empty|settings|replay>&theme=<dark|light>
+```
+
+`scene=replay` folds `desktop/src/__replay.ts` — captured frames from a real
+session — through the real reducer, which is how ordering bugs are caught
+without a live run.
 
 ### Rule 9.3
 

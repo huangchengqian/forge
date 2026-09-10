@@ -45,6 +45,7 @@ export interface ProjectRecord {
 
 /** Persisted event envelope pushed over SSE (server event-stream protocol). */
 export interface EventEnvelope {
+  /** Monotonic per-session sequence number; absent in raw log files. */
   seq?: string;
   type: string;
   payload: {
@@ -53,7 +54,9 @@ export interface EventEnvelope {
     at?: number;
     [key: string]: unknown;
   };
+  /** SSE frames stamp `timestamp`; the on-disk JSONL uses `at`. */
   at?: number;
+  timestamp?: number;
 }
 
 /** Tool call as rendered in the conversation stream. */
@@ -85,18 +88,37 @@ export interface StuckWarningView {
   repetitions: number;
 }
 
+/**
+ * One entry in the session transcript.
+ *
+ * The server streams a strictly ordered event log (MESSAGE_STARTED →
+ * TEXT_DELTA* → MESSAGE_ENDED, with TOOL_CALL interleaved), so the UI keeps a
+ * single ordered timeline rather than parallel message/tool arrays — otherwise
+ * tool calls lose their position and multi-turn prompts lose their order.
+ */
+export type TimelineEntry =
+  | { kind: "user"; id: string; text: string }
+  /** `thinking` is true while the model is emitting reasoning but no text yet. */
+  | { kind: "assistant"; id: string; text: string; streaming: boolean; thinking: boolean }
+  | {
+      kind: "tool";
+      id: string;
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+      result?: unknown;
+      isError?: boolean;
+      running: boolean;
+    }
+  /** Session-level marker rendered in place: compaction, resume, model switch. */
+  | { kind: "notice"; id: string; tone: "info" | "ok" | "warn"; icon: string; text: string };
+
 /** Reduced view state derived from the SSE event stream. */
 export interface ConversationView {
-  messages: Array<{ role: "user" | "assistant"; text: string }>;
-  toolCalls: ToolCallView[];
+  timeline: TimelineEntry[];
   verification: VerificationView[];
   costSpent: number;
   costBudget: number | null;
-  stuck: StuckWarningView | null;
-  /** Last compaction seen on the stream (mode: "llm-summary" | "truncate"). */
-  compaction: { mode: string; at: number } | null;
-  /** Set when the stream replays a SESSION_RESUMED marker. */
-  resumed: { messagesRecovered: number } | null;
   /** Updated by MODEL_CHANGED events (mid-session model switch). */
   modelId: string | null;
 }

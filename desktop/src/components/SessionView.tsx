@@ -1,43 +1,52 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { store } from "../lib/store.ts";
 import { fetchConfig } from "../lib/api.ts";
 import { Markdown } from "./Markdown.tsx";
-import type { ProviderConfig } from "../types.ts";
+import type { ProviderConfig, TimelineEntry } from "../types.ts";
 
-/** Tool call row with expandable args/result. */
-function ToolRow({ call }: { call: { toolCallId: string; toolName: string; args: unknown; result?: unknown; isError?: boolean; running: boolean } }) {
+/** One-line argument summary for a tool row (the full JSON lives behind expand). */
+function summarizeArgs(args: unknown): string {
+  const a = (args ?? {}) as Record<string, unknown>;
+  for (const key of ["command", "path", "file_path", "pattern", "query", "url"]) {
+    const v = a[key];
+    if (typeof v === "string" && v) return v;
+  }
+  const json = JSON.stringify(args ?? {});
+  return json === "{}" ? "" : json;
+}
+
+function ToolRow({ entry }: { entry: Extract<TimelineEntry, { kind: "tool" }> }) {
   const [open, setOpen] = useState(false);
+  const state = entry.running ? "running" : entry.isError ? "error" : "ok";
   return (
-    <div className="tool-row" onClick={() => setOpen((v) => !v)}>
-      <span className="caret">{open ? "▾" : "▸"}</span>
-      <span
-        style={{
-          width: 14,
-          height: 14,
-          borderRadius: 4,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 10,
-          color: "#fff",
-          background: call.running
-            ? "var(--yellow)"
-            : call.isError
-              ? "var(--red)"
-              : "var(--green)",
-          flexShrink: 0,
-        }}
+    <div className={`tool tool-${state}`}>
+      <button
+        type="button"
+        className="tool-line"
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "Collapse" : "Expand full arguments and result"}
       >
-        {call.running ? "…" : call.isError ? "✕" : "✓"}
-      </span>
-      <span className="tool-summary">
-        {call.toolName} {JSON.stringify(call.args).slice(0, 90)}
-      </span>
+        <span className="tool-mark" aria-hidden="true">
+          {entry.running ? "" : entry.isError ? "✕" : "✓"}
+        </span>
+        <span className="tool-name">{entry.toolName}</span>
+        <span className="tool-arg">{summarizeArgs(entry.args)}</span>
+        <span className="tool-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+      </button>
       {open && (
         <pre className="tool-detail">
-          {JSON.stringify({ args: call.args, result: call.result }, null, 2).slice(0, 4000)}
+          {JSON.stringify({ args: entry.args, result: entry.result }, null, 2).slice(0, 4000)}
         </pre>
       )}
+    </div>
+  );
+}
+
+function Notice({ entry }: { entry: Extract<TimelineEntry, { kind: "notice" }> }) {
+  return (
+    <div className={`notice notice-${entry.tone}`}>
+      <span className="notice-icon" aria-hidden="true">{entry.icon}</span>
+      <span>{entry.text}</span>
     </div>
   );
 }
@@ -48,101 +57,52 @@ function VerificationPanel() {
   if (verification.length === 0) return null;
   const last = verification[verification.length - 1]!;
   return (
-    <div className="card" style={{ borderColor: last.passed ? "color-mix(in srgb, var(--green) 40%, var(--border))" : "color-mix(in srgb, var(--red) 40%, var(--border))" }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-        Verification
+    <section className="verify" data-state={last.passed ? "pass" : "fail"}>
+      <div className="verify-head">
+        <span className="verify-title">Verification</span>
+        <span className={`verify-badge ${last.passed ? "ok" : "bad"}`}>
+          {last.passed ? "passed" : "failed"}
+        </span>
       </div>
       {verification.map((v, i) => (
-        <div key={i} style={{ display: "flex", gap: 8, fontSize: 12.5, padding: "2px 0" }}>
-          <span style={{ color: v.passed ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
-            {v.passed ? "PASS" : "FAIL"}
-          </span>
-          <span style={{ color: "var(--text-secondary)" }}>
+        <div key={i} className="verify-row">
+          <span className={`verify-mark ${v.passed ? "ok" : "bad"}`}>{v.passed ? "PASS" : "FAIL"}</span>
+          <span className="verify-reason">
             round {v.round}
             {v.reason ? ` — ${v.reason}` : ""}
           </span>
         </div>
       ))}
       {!last.passed && (
-        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 4 }}>
-          Agent is being steered back to fix the failure…
-        </div>
+        <div className="verify-foot">The agent is being steered back to fix the failure…</div>
       )}
-    </div>
+    </section>
   );
 }
 
 function CostGauge({ spent, budget }: { spent: number; budget: number | null }) {
   if (spent <= 0) return null;
+  const ratio = budget && budget > 0 ? Math.min(spent / budget, 1) : null;
+  // Sub-cent runs are the common case early on — "$0.00" reads as broken.
+  const label = spent < 0.01 ? "<$0.01" : `$${spent.toFixed(2)}`;
   return (
-    <span className="chip" title="session cost">
-      ${spent.toFixed(2)}
-      {budget !== null ? ` / $${budget}` : ""}
+    <span
+      className="cost"
+      data-tight={ratio !== null && ratio > 0.75 ? "true" : undefined}
+      title={budget !== null ? `$${spent.toFixed(4)} of $${budget} budget` : `$${spent.toFixed(4)} spent`}
+    >
+      {label}
+      {budget !== null && <span className="cost-cap"> / ${budget}</span>}
     </span>
   );
 }
 
-/** Shared visual language for session-level notices. */
-function Notice({ tone, icon, children }: { tone: "info" | "ok" | "warn"; icon: string; children: React.ReactNode }) {
-  const color = tone === "ok" ? "var(--green)" : tone === "warn" ? "var(--yellow)" : "var(--accent)";
+/** Empty transcript — the session exists but nothing has been produced yet. */
+function EmptyConversation({ running }: { running: boolean }) {
   return (
-    <div
-      style={{
-        margin: "10px 0",
-        padding: "8px 12px",
-        border: `1px solid color-mix(in srgb, ${color} 45%, var(--border))`,
-        borderLeft: `3px solid ${color}`,
-        borderRadius: 8,
-        color: "var(--text-secondary)",
-        fontSize: 12.5,
-        background: `color-mix(in srgb, ${color} 6%, transparent)`,
-      }}
-    >
-      {icon} {children}
-    </div>
-  );
-}
-
-function CompactionNotice() {
-  const compaction = store((s) => s.conversation.compaction);
-  if (!compaction) return null;
-  return (
-    <Notice tone="info" icon="✦">
-      Context compacted ({compaction.mode}) — older history was summarized into a
-      checkpoint. The model's view of the conversation changed; behaviour may differ slightly.
-    </Notice>
-  );
-}
-
-function ResumedNotice() {
-  const resumed = store((s) => s.conversation.resumed);
-  if (!resumed) return null;
-  return (
-    <Notice tone="ok" icon="↻">
-      Resumed — recovered {resumed.messagesRecovered} message
-      {resumed.messagesRecovered === 1 ? "" : "s"} from the event log.
-    </Notice>
-  );
-}
-
-function StuckWarning() {
-  const stuck = store((s) => s.conversation.stuck);
-  if (!stuck) return null;
-  return (
-    <Notice tone="warn" icon="⚠">
-      Stuck: {stuck.pattern} ×{stuck.repetitions} — the session is being terminated to protect your budget.
-    </Notice>
-  );
-}
-
-/** Empty-state: a session with no conversation output at all. */
-function EmptyConversation() {
-  const conversation = store((s) => s.conversation);
-  if (conversation.messages.length > 0 || conversation.toolCalls.length > 0) return null;
-  return (
-    <div style={{ margin: "48px 0", color: "var(--text-muted)", fontSize: 13.5, textAlign: "center" }}>
-      <div style={{ fontSize: 26, marginBottom: 10, opacity: 0.5 }}>◌</div>
-      No messages yet — the agent hasn't produced any output for this session.
+    <div className="empty-state">
+      <div className="empty-mark">◌</div>
+      {running ? "Waiting for the agent's first output…" : "No messages yet for this session."}
     </div>
   );
 }
@@ -157,8 +117,6 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
 }) {
   const conversation = store((s) => s.conversation);
   const connected = store((s) => s.connected);
-  const costSpent = store((s) => s.conversation.costSpent);
-  const costBudget = store((s) => s.conversation.costBudget);
   const steer = store((s) => s.steer);
   const abort = store((s) => s.abort);
   const resume = store((s) => s.resume);
@@ -171,14 +129,43 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const running = status === "running";
   const resumable = status === "failed" || status === "cancelled";
+  const canFollowUp = status === "completed";
   // MODEL_CHANGED events override the session's original model in the UI.
   const effectiveModelId = conversation.modelId ?? modelId;
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const pinnedRef = useRef(true);
+  const endRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     void fetchConfig()
       .then((cfg) => setProviders(cfg.providers))
       .catch(() => {});
   }, []);
+
+  // Grow the composer with the content instead of reserving fixed rows.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [steerInput]);
+
+  // Auto-follow the stream, but never yank the viewport if the user scrolled up.
+  const tick = conversation.timeline.reduce(
+    (n, e) => n + (e.kind === "user" || e.kind === "assistant" ? e.text.length : 1),
+    conversation.timeline.length,
+  );
+  useEffect(() => {
+    if (pinnedRef.current) endRef.current?.scrollIntoView({ block: "end" });
+  }, [tick]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+  };
 
   const onModelSwitch = async (providerId: string) => {
     if (!providerId || providerId === effectiveModelId) return;
@@ -195,68 +182,60 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
   // failed/cancelled retries (message optional — empty retries the goal).
   const send = async () => {
     const text = steerInput.trim();
-    if (running) {
+    if (running || canFollowUp) {
       if (!text) return;
-      await steer(text);
-      setSteerInput("");
-      return;
-    }
-    if (status === "completed") {
-      if (!text) return;
-      await resume(text);
+      await (running ? steer(text) : resume(text));
       setSteerInput("");
       return;
     }
     await resume(text || undefined);
     setSteerInput("");
   };
-  const canSend = running || status === "completed" ? !!steerInput.trim() : true;
-
-  const endRef = (el: HTMLDivElement | null) => {
-    el?.scrollIntoView({ behavior: "smooth", block: "end" });
-  };
+  const canSend = running || canFollowUp ? !!steerInput.trim() : true;
+  const placeholder = running
+    ? "Steer the agent at the next turn boundary…"
+    : canFollowUp
+      ? "Reply to continue this conversation…"
+      : "Describe what to change, or send an empty message to retry the task…";
+  const sendLabel = running || canFollowUp ? "Send" : "Retry";
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div className="session-head">
-        <span className="session-head-title" title={goal}>{goal}</span>
-        <span className="chip">
-          <span
-            className="dot"
-            style={{
-              background:
-                status === "completed"
-                  ? "var(--green)"
-                  : status === "failed"
-                    ? "var(--red)"
-                    : status === "cancelled"
-                      ? "var(--text-muted)"
-                      : "var(--accent)",
-            }}
-          />
-          {status}
-        </span>
-        <CostGauge spent={costSpent} budget={costBudget} />
-        {running && (
-          <button className="btn btn-danger btn-small" onClick={() => void abort()}>
-            ■ Stop
-          </button>
-        )}
-        {resumable && (
-          <button
-            className="btn btn-primary btn-small"
-            onClick={() => {
-              setResumeMessage("");
-              setResumeOpen(true);
-            }}
-            title="Resume this session from its event log"
-          >
-            ↻ Resume
-          </button>
-        )}
-        <button className="btn btn-ghost btn-small" onClick={() => void showDiff()}>Diff</button>
-        <button className="btn btn-ghost btn-small" onClick={() => void undo()}>Undo</button>
-      </div>
+    <div className="session">
+      <header className="session-head">
+        <div className="session-head-inner">
+          <h1 className="session-goal" title={goal}>{goal}</h1>
+          <span className="status-chip" data-status={status}>
+            <span className="status-dot" />
+            {status}
+          </span>
+          <CostGauge spent={conversation.costSpent} budget={conversation.costBudget} />
+          <div className="head-actions">
+            {running && (
+              <button className="btn btn-stop btn-small" onClick={() => void abort()}>
+                Stop
+              </button>
+            )}
+            {resumable && (
+              <button
+                className="btn btn-primary btn-small"
+                onClick={() => {
+                  setResumeMessage("");
+                  setResumeOpen(true);
+                }}
+                title="Resume this session from its event log"
+              >
+                Resume
+              </button>
+            )}
+            <button className="btn btn-quiet btn-small" onClick={() => void showDiff()} title="Show changes made in this workspace">
+              Diff
+            </button>
+            <button className="btn btn-quiet btn-small" onClick={() => void undo()} title="Roll back the agent's last file changes">
+              Undo
+            </button>
+          </div>
+        </div>
+      </header>
 
       {resumeOpen && (
         <div
@@ -266,10 +245,10 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
           }}
         >
           <div className="modal">
-            <h3 style={{ marginTop: 0 }}>Resume session</h3>
-            <p style={{ color: "var(--text-muted)", marginTop: 0 }}>
-              The agent will continue from its event log. Optionally add a
-              steering instruction (e.g. "also fix the failing tests").
+            <h3 className="modal-title">Resume session</h3>
+            <p className="modal-text">
+              The agent will continue from its event log. Optionally add a steering
+              instruction (e.g. "also fix the failing tests").
             </p>
             <textarea
               className="composer-textarea"
@@ -279,11 +258,8 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
               rows={3}
               style={{ width: "100%", marginBottom: 12 }}
             />
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button
-                className="btn btn-ghost btn-small"
-                onClick={() => setResumeOpen(false)}
-              >
+            <div className="modal-actions">
+              <button className="btn btn-ghost btn-small" onClick={() => setResumeOpen(false)}>
                 Cancel
               </button>
               <button
@@ -300,62 +276,81 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
         </div>
       )}
 
-      <div className="conversation-scroll">
+      <div className="conversation-scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="conversation-canvas">
-          <ResumedNotice />
-          <EmptyConversation />
-          {conversation.messages.map((m, i) =>
-            m.role === "user" ? (
-              <div key={i} className="message message-user">
-                <div className="message-user-body">{m.text}</div>
-              </div>
-            ) : (
-              <div key={i} className="message message-agent">
-                <div className="role-label">Agent</div>
-                <div className="md">
-                  <Markdown text={m.text} />
-                </div>
-              </div>
-            ),
-          )}
+          {conversation.timeline.length === 0 && <EmptyConversation running={running} />}
 
-          {conversation.toolCalls.map((call) => (
-            <ToolRow key={call.toolCallId} call={call} />
-          ))}
+          {conversation.timeline.map((entry) => {
+            if (entry.kind === "user") {
+              return (
+                <article key={entry.id} className="entry entry-user">
+                  <div className="bubble-user">{entry.text}</div>
+                </article>
+              );
+            }
+            if (entry.kind === "notice") return <Notice key={entry.id} entry={entry} />;
+            if (entry.kind === "tool") {
+              return (
+                <article key={entry.id} className="entry entry-tool">
+                  <ToolRow entry={entry} />
+                </article>
+              );
+            }
+            return (
+              <article key={entry.id} className={`entry entry-agent${entry.streaming ? " is-streaming" : ""}`}>
+                {entry.thinking && !entry.text ? (
+                  <div className="thinking">
+                    <span className="thinking-dots" aria-hidden="true">
+                      <i /><i /><i />
+                    </span>
+                    Thinking…
+                  </div>
+                ) : (
+                  <div className="md">
+                    <Markdown text={entry.text} />
+                  </div>
+                )}
+              </article>
+            );
+          })}
 
-          <CompactionNotice />
           <VerificationPanel />
-          <StuckWarning />
 
           {failureReason && (
-            <Notice tone="warn" icon="✕">
-              Session failed: {failureReason}
-            </Notice>
+            <div className="notice notice-warn">
+              <span className="notice-icon" aria-hidden="true">✕</span>
+              <span>Session failed: {failureReason}</span>
+            </div>
           )}
           <div ref={endRef} />
         </div>
       </div>
 
       {diffText !== null && (
-        <div style={{ borderTop: "1px solid var(--border)", padding: "10px 28px", maxHeight: 200, overflowY: "auto" }}>
-          <pre style={{ fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "pre-wrap", margin: 0 }}>{diffText}</pre>
-        </div>
+        <section className="diff-panel">
+          <div className="diff-panel-head">
+            <span>Changes in this workspace</span>
+            <button
+              className="icon-btn"
+              title="Hide"
+              onClick={() => store.setState({ diffText: null })}
+            >
+              ✕
+            </button>
+          </div>
+          <pre className="diff-panel-body">{diffText}</pre>
+        </section>
       )}
 
-      <div className="conversation-composer-wrap">
+      <footer className="composer-wrap">
         <div className="conversation-composer">
-          <div className="composer-box" style={{ padding: "10px 12px 8px" }}>
+          <div className="composer-box">
             <textarea
+              ref={taRef}
               className="composer-ta"
-              rows={2}
-              placeholder={
-                running
-                  ? "Steer the agent at the next turn boundary…  (Enter to send)"
-                  : status === "completed"
-                    ? "Reply to continue this conversation…  (Enter to send)"
-                    : "Describe what to change, or press Enter to retry the task…"
-              }
-              disabled={!running && !resumable && status !== "completed"}
+              rows={1}
+              placeholder={placeholder}
+              disabled={!running && !resumable && !canFollowUp}
               value={steerInput}
               onChange={(e) => setSteerInput(e.target.value)}
               onKeyDown={(e) => {
@@ -365,13 +360,15 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
                 }
               }}
             />
-            <div className="composer-actions" style={{ justifyContent: "space-between" }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div className="composer-actions">
+              <div className="composer-meta">
                 <select
-                  className="composer-model-select"
-                  value={providers.some((p) => p.modelId === effectiveModelId)
-                    ? providers.find((p) => p.modelId === effectiveModelId)!.id
-                    : ""}
+                  className="model-picker"
+                  value={
+                    providers.some((p) => p.modelId === effectiveModelId)
+                      ? providers.find((p) => p.modelId === effectiveModelId)!.id
+                      : ""
+                  }
                   onChange={(e) => void onModelSwitch(e.target.value)}
                   title="Model subscription — switching takes effect at the next turn boundary"
                 >
@@ -384,12 +381,13 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
                     </option>
                   ))}
                 </select>
-                <span className="chip" title="completion verification level for this session">
-                  trust: {trustLevel}
+                <span className="meta-sep" aria-hidden="true">·</span>
+                <span className="meta-item" title="Completion verification level for this session">
+                  trust {trustLevel}
                 </span>
                 {!connected && (
-                  <span className="chip" title="live event stream reconnecting…">
-                    <span className="dot" style={{ background: "var(--yellow)" }} />
+                  <span className="meta-item meta-warn" title="Live event stream is reconnecting…">
+                    <span className="status-dot" data-tone="warn" />
                     reconnecting
                   </span>
                 )}
@@ -398,13 +396,19 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
                 className="btn btn-primary btn-small"
                 onClick={() => void send()}
                 disabled={!canSend}
+                title="Enter to send · Shift+Enter for a new line"
               >
-                {running ? "Send ↵" : status === "completed" ? "Send ↵" : "Retry ↵"}
+                {sendLabel}
+                <span className="key-hint">↵</span>
               </button>
             </div>
           </div>
+          <div className="composer-hint">
+            <span><b>Enter</b> to send · <b>Shift+Enter</b> for a new line</span>
+            {!running && !canFollowUp && resumable && <span>Sending an empty message retries the goal</span>}
+          </div>
         </div>
-      </div>
+      </footer>
     </div>
   );
 }
