@@ -183,6 +183,17 @@ async function main(): Promise<void> {
     //    (2026-09-09): it must NOT be blocked — the follow-up relaunches the
     //    loop with the message as the prompt. Verify it flips the session
     //    back to running (then it settles again).
+    //
+    //    Only a settled session is resumable, and how long the first run
+    //    needs to settle is machine-dependent — poll for it instead of racing
+    //    a fixed sleep. (A hard-coded 200ms wait here made this test fail on
+    //    any machine where the run settles slower than that.)
+    let settled = after;
+    for (let i = 0; i < 40 && settled?.status === "running"; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      settled = await loadSession(sessionId);
+    }
+
     let followed = false;
     try {
       await manager.resume(sessionId);
