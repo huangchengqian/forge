@@ -3,6 +3,7 @@ import {
   type AgentContext,
   type AgentLoopConfig,
   type AgentMessage,
+  type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import { createCodingTools } from "@earendil-works/pi-coding-agent";
@@ -54,8 +55,25 @@ export async function runAgent(opts: {
   /** Mid-session model switch: called at each turn boundary; a non-null
    *  return replaces the loop's model from that turn on (consumed once). */
   takeModelSwitch?: (() => Model<any> | null) | undefined;
+  /** Reasoning effort for this run (persisted on the session). `"off"` sends
+   *  no reasoning parameter. Ignored when the model has no reasoning support
+   *  — see the gate on `config.reasoning` below. */
+  thinkingLevel?: ThinkingLevel | undefined;
+  /** Mid-session thinking switch: called at each turn boundary; a non-null
+   *  return replaces the loop's reasoning level from that turn on. */
+  takeThinkingSwitch?: (() => ThinkingLevel | null) | undefined;
 }): Promise<Session> {
-  const { session, model, guardrails, signal, streamFn, promptOverride, takeModelSwitch } = opts;
+  const {
+    session,
+    model,
+    guardrails,
+    signal,
+    streamFn,
+    promptOverride,
+    takeModelSwitch,
+    thinkingLevel,
+    takeThinkingSwitch,
+  } = opts;
 
   const tools = createCodingTools(session.workspace) ?? [];
   const context: AgentContext = {
@@ -69,6 +87,15 @@ export async function runAgent(opts: {
     convertToLlm: defaultConvertToLlm as AgentLoopConfig["convertToLlm"],
     transformContext: makeTransformContext(),
   };
+
+  // Gate the reasoning level on the model's own capability flag. The adapters
+  // translate `reasoning` into a provider parameter (Anthropic `thinking`,
+  // OpenAI `reasoning.effort`, …); sending one to a model that does not
+  // support it is a 400 waiting to happen. `"off"` means "send nothing",
+  // identical to leaving the field undefined.
+  if (model.reasoning && thinkingLevel && thinkingLevel !== "off") {
+    config.reasoning = thinkingLevel;
+  }
 
   if (guardrails) {
     config.beforeToolCall = makeBeforeToolCall(guardrails);
@@ -85,6 +112,7 @@ export async function runAgent(opts: {
       costGuard: guardrails.costGuard,
       emitEvent: (type, payload) => appendEvent(session.id, type as Parameters<typeof appendEvent>[1], payload),
       takeModelSwitch,
+      takeThinkingSwitch,
       compact: {
         model,
         completeSimple: async (m: unknown, context: unknown, options: unknown) => {

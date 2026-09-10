@@ -1,4 +1,4 @@
-export const SESSION_SCHEMA_VERSION = 5;
+export const SESSION_SCHEMA_VERSION = 6;
 
 type Migration = {
   from: number;
@@ -45,6 +45,20 @@ function addMaxTurns(raw: Record<string, unknown>): Record<string, unknown> {
   return { ...raw, maxTurns: null };
 }
 
+/**
+ * v5 → v6: persist `thinkingLevel`.
+ *
+ * The reasoning effort was never recorded on a session: `config.reasoning`
+ * was left undefined, which every adapter reads as "send no reasoning
+ * parameter" — i.e. off. v6 records the choice explicitly so it can be shown
+ * and switched mid-session. Old sessions migrate to "off" (what they actually
+ * ran with), not to the new-session default: a migration must not silently
+ * change how a stored session behaves.
+ */
+function addThinkingLevel(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, thinkingLevel: "off" };
+}
+
 const MIGRATIONS: readonly Migration[] = [
   {
     from: 0,
@@ -70,6 +84,11 @@ const MIGRATIONS: readonly Migration[] = [
     from: 4,
     to: 5,
     migrate: (raw) => addMaxTurns(raw),
+  },
+  {
+    from: 5,
+    to: 6,
+    migrate: (raw) => addThinkingLevel(raw),
   },
 ];
 
@@ -97,6 +116,7 @@ function migrateLegacyTaskToSession(raw: Record<string, unknown>): Record<string
     failureReason: legacyFailure ?? (status === "cancelled" ? "migrated from legacy task state" : null),
     cost: { total: 0, budget: null },
     trustLevel: "medium",
+    thinkingLevel: "off",
     completionCriteria: [],
     lastEvaluation: raw.lastEvaluation ?? null,
     maxTurns: null,

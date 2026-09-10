@@ -31,6 +31,9 @@ export type PersistedEventType =
   // Same plane as MODEL_CHANGED: an operator action, not a loop signal — the
   // UI reads it from the log over SSE, so it stays out of the control bus.
   | "TRUST_CHANGED"
+  // mid-session thinking-level switch (POST /sessions/:id/thinking).
+  // Same plane as MODEL_CHANGED: an operator action the UI reads from the log.
+  | "THINKING_CHANGED"
   | "TURN_STARTED"
   | "TURN_ENDED"
   | "MESSAGE_STARTED"

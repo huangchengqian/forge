@@ -55,6 +55,7 @@ const sessions = [
     failureReason: null,
     cost: { total: 0.42, budget: 2 },
     trustLevel: "medium" as const,
+    thinkingLevel: "medium" as const,
     maxTurns: null,
     createdAt: now - 40 * MIN,
     updatedAt: now - 30_000,
@@ -70,6 +71,7 @@ const sessions = [
     failureReason: null,
     cost: { total: 1.13, budget: null },
     trustLevel: "high" as const,
+    thinkingLevel: "high" as const,
     maxTurns: null,
     createdAt: now - 26 * 60 * MIN,
     updatedAt: now - 3 * 60 * MIN,
@@ -85,6 +87,7 @@ const sessions = [
     failureReason: null,
     cost: { total: 0.08, budget: null },
     trustLevel: "low" as const,
+    thinkingLevel: "off" as const,
     maxTurns: null,
     createdAt: now - 50 * 60 * MIN,
     updatedAt: now - 40 * 60 * MIN,
@@ -100,6 +103,7 @@ const sessions = [
     failureReason: "verification failed after 3 recovery attempts",
     cost: { total: 0.77, budget: 1 },
     trustLevel: "medium" as const,
+    thinkingLevel: "medium" as const,
     maxTurns: null,
     createdAt: now - 5 * 24 * 60 * MIN,
     updatedAt: now - 5 * 24 * 60 * MIN,
@@ -115,6 +119,7 @@ const sessions = [
     failureReason: null,
     cost: { total: 0.55, budget: null },
     trustLevel: "medium" as const,
+    thinkingLevel: "medium" as const,
     maxTurns: null,
     createdAt: now - 8 * 24 * 60 * MIN,
     updatedAt: now - 8 * 24 * 60 * MIN,
@@ -222,7 +227,15 @@ store.setState({
   theme,
   conversation:
     scene === "session"
-      ? { timeline, verification, costSpent: 0.42, costBudget: 2, modelId: null, trustLevel: null }
+      ? {
+          timeline,
+          verification,
+          costSpent: 0.42,
+          costBudget: 2,
+          modelId: null,
+          trustLevel: null,
+          thinkingLevel: null,
+        }
       : scene === "replay"
         ? replayConversation()
         : scene === "thinking"
@@ -236,8 +249,17 @@ store.setState({
               costBudget: 2,
               modelId: null,
               trustLevel: null,
+              thinkingLevel: null,
             }
-          : { timeline: [], verification: [], costSpent: 0, costBudget: null, modelId: null, trustLevel: null },
+          : {
+              timeline: [],
+              verification: [],
+              costSpent: 0,
+              costBudget: null,
+              modelId: null,
+              trustLevel: null,
+              thinkingLevel: null,
+            },
 });
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -346,17 +368,21 @@ createRoot(document.getElementById("root")!).render(
           failureReason={null}
           modelId={replay ? "MiniMax-M2.7" : active.model.modelId}
           trustLevel={replay ? "low" : active.trustLevel}
+          thinkingLevel={replay ? "off" : active.thinkingLevel}
         />
       )}
     </Shell>
     {scene === "notify" && <NotifyProbe />}
     {scene === "picker" && (
+      // Anchored to the bottom like a real composer, and opening upward —
+      // otherwise a three-group panel runs off the bottom of the viewport.
       <div
         style={{
           position: "fixed",
           inset: 0,
           display: "grid",
-          placeItems: "center",
+          placeItems: "end center",
+          paddingBottom: 88,
           zIndex: 90,
         }}
       >
@@ -366,7 +392,10 @@ createRoot(document.getElementById("root")!).render(
           onSelectModel={() => {}}
           trustLevel="medium"
           onSelectTrust={() => {}}
-          placement="below"
+          thinkingLevel="medium"
+          thinkingLevels={["off", "minimal", "low", "medium", "high"]}
+          onSelectThinking={() => {}}
+          placement="above"
           defaultOpen
         />
       </div>

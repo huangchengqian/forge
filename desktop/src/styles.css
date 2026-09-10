@@ -523,13 +523,19 @@ body.preview-hover .session-del { display: inline-flex; }
   width: 3px; height: 3px; border-radius: 99px; flex-shrink: 0;
   background: currentColor; opacity: 0.42;
 }
-.picker-trust { color: var(--text-muted); flex-shrink: 0; }
+.picker-trust,
+.picker-thinking { color: var(--text-muted); flex-shrink: 0; }
 .picker-caret { display: inline-flex; color: var(--text-muted); transition: transform 0.15s ease; }
 .picker-caret.is-open { transform: rotate(180deg); }
 
 .picker-panel {
   position: absolute; z-index: 40;
   min-width: 262px; max-width: min(340px, 86vw);
+  /* Three groups now (model / verification / thinking) — cap the height so the
+     panel never runs off screen, and let it scroll instead. */
+  max-height: min(78vh, 640px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 5px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-strong);

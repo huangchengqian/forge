@@ -124,6 +124,7 @@ async function main(): Promise<void> {
     failureReason: null,
     cost: { total: 0, budget: null },
     trustLevel: "low",
+    thinkingLevel: "off",
     completionCriteria: [],
     lastEvaluation: null,
       maxTurns: null,

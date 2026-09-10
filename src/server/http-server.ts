@@ -7,6 +7,23 @@ import { SessionManager } from "./session-manager.ts";
 import { computeDiff, restoreUndo } from "./undo.ts";
 import { isAuthorized, newToken, writeHandshake } from "./auth.ts";
 import { loadForgeConfig, saveForgeConfig } from "./config-store.ts";
+import { modelThinkingLevels } from "./model-resolver.ts";
+import type { ThinkingLevel } from "../types.ts";
+
+/** Pi's full thinking-level set — see pi-ai's ThinkingLevel / ModelThinkingLevel. */
+const THINKING_LEVEL_VALUES: ReadonlySet<string> = new Set([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
+function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return typeof value === "string" && THINKING_LEVEL_VALUES.has(value);
+}
 
 export type ForgeServerOptions = {
   port: number;
@@ -53,6 +70,7 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
           ...(typeof body.projectId === "string" ? { projectId: body.projectId } : {}),
           ...(typeof body.providerId === "string" ? { providerId: body.providerId } : {}),
           ...(body.trustLevel ? { trustLevel: body.trustLevel } : {}),
+          ...(body.thinkingLevel ? { thinkingLevel: body.thinkingLevel } : {}),
           ...(Array.isArray(body.criteria) ? { criteria: body.criteria } : {}),
           ...(typeof body.maxCost === "number" ? { maxCost: body.maxCost } : {}),
           ...(typeof body.maxTurns === "number" ? { maxTurns: body.maxTurns } : {}),
@@ -137,6 +155,27 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
         return;
       }
 
+      // Mid-session thinking-level switch (reasoning effort). Running: the
+      // loop applies it at the next turn boundary; idle: persisted for the
+      // next resume.
+      if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "thinking") {
+        const body = await readBody(req);
+        const level = body.thinkingLevel;
+        if (!isThinkingLevel(level)) {
+          json(res, 400, {
+            error: `thinkingLevel must be one of ${[...THINKING_LEVEL_VALUES].join(", ")}`,
+          });
+          return;
+        }
+        try {
+          const result = await manager.switchThinking(parts[1]!, level);
+          json(res, 200, result);
+        } catch (err) {
+          json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
       if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "abort") {
         const result = await manager.abort(parts[1]!);
         json(res, result.ok ? 202 : 409, result);
@@ -210,7 +249,15 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
 
       // --- Config (model subscriptions; Desktop Settings) ---
       if (req.method === "GET" && url.pathname === "/config") {
-        json(res, 200, await loadForgeConfig(opts.forgeHome));
+        const cfg = await loadForgeConfig(opts.forgeHome);
+        // Derived, never persisted: which thinking levels each subscription's
+        // model actually supports. The picker offers only these, so a level
+        // that would silently no-op is never shown.
+        const modelCapabilities: Record<string, string[]> = {};
+        for (const provider of cfg.providers) {
+          modelCapabilities[provider.id] = modelThinkingLevels(provider);
+        }
+        json(res, 200, { ...cfg, modelCapabilities });
         return;
       }
 

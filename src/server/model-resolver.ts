@@ -1,4 +1,9 @@
-import { streamSimple, getModels, getProviders } from "@earendil-works/pi-ai/compat";
+import {
+  streamSimple,
+  getModels,
+  getProviders,
+  getSupportedThinkingLevels,
+} from "@earendil-works/pi-ai/compat";
 import type { Model } from "@earendil-works/pi-ai";
 import { agentLoop } from "@earendil-works/pi-agent-core";
 import type { ProviderConfig } from "./config-store.ts";
@@ -39,7 +44,13 @@ export function buildModel(subscription: ProviderConfig): Model<any> {
       `[forge] model "${subscription.modelId}" not in Pi catalog — cost guard will see $0 (pricing unknown)`,
     );
   }
+  // Start from the catalog entry when there is one, then override the
+  // identity fields with the subscription's. Rebuilding the object from
+  // scratch (the previous shape) silently dropped `thinkingLevelMap` and
+  // `compat` — the very fields the adapters read to translate a thinking
+  // level into the provider's own effort values.
   return {
+    ...(catalog ?? {}),
     id: subscription.modelId,
     name: catalog?.name ?? subscription.modelId,
     api: subscription.api,
@@ -51,6 +62,21 @@ export function buildModel(subscription: ProviderConfig): Model<any> {
     contextWindow: catalog?.contextWindow ?? 128_000,
     maxTokens: catalog?.maxTokens ?? 8_192,
   } as unknown as Model<any>;
+}
+
+/**
+ * Thinking levels this subscription's model actually supports, in Pi's own
+ * order. A non-reasoning model yields `["off"]`, and levels marked
+ * unsupported in the model's `thinkingLevelMap` are filtered out — so the UI
+ * can offer only levels that will do something, instead of a control that
+ * silently no-ops.
+ */
+export function modelThinkingLevels(subscription: ProviderConfig): string[] {
+  try {
+    return getSupportedThinkingLevels(buildModel(subscription) as never) as string[];
+  } catch {
+    return ["off"];
+  }
 }
 
 /** Canonical env key per protocol, seeded for any env-consulting code path. */

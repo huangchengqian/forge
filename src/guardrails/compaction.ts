@@ -3,6 +3,7 @@ import type {
   AgentLoopTurnUpdate,
   Entry,
   PrepareNextTurnContext,
+  ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import {
   compact as piCompact,
@@ -62,12 +63,16 @@ function toVirtualEntries(messages: AgentMessage[]): Entry[] {
  * Build the `prepareNextTurn` hook.
  *
  * Contract (per Pi's `AgentLoopConfig.prepareNextTurn`):
- *   - Must not throw. Return undefined when no compaction is warranted.
+ *   - Must not throw. Return undefined when nothing is warranted.
+ *   - When a runtime switch is pending (model / thinking level), return it as
+ *     `model` / `thinkingLevel`. No context change is involved.
  *   - When compaction is warranted, return an `AgentLoopTurnUpdate` whose
  *     `context.messages` is the post-compaction transcript. The agent loop
  *     uses that for the next LLM request.
  *
  * Trigger policy:
+ *   - Pending runtime switches are returned first, unconditionally — they are
+ *     operator actions, not a consequence of context pressure.
  *   - Read `costGuard.getLastInputTokens()` (the most recent assistant
  *     message's reported input token count — authoritative provider-side).
  *   - If it exceeds `thresholdTokens`, compact.
@@ -98,6 +103,8 @@ export function makePrepareNextTurn(opts: {
   /** Mid-session model switch: a non-null return replaces the loop's model
    *  from this turn on (consumed once — SessionManager clears its slot). */
   takeModelSwitch?: (() => Model<any> | null) | undefined;
+  /** Mid-session thinking-level switch: same consume-once contract. */
+  takeThinkingSwitch?: (() => ThinkingLevel | null) | undefined;
 }): (ctx: PrepareNextTurnContext, signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> {
   const threshold =
     opts.thresholdTokens ??
@@ -132,25 +139,38 @@ export function makePrepareNextTurn(opts: {
     if (debug) {
       console.error(`[compaction] hook fired: lastInput=${lastInput} threshold=${threshold} messages=${ctx.context.messages.length}`);
     }
+
+    // --- Runtime switches (model / thinking level) ---
+    // These are operator actions, not a consequence of context pressure, so
+    // they are checked *before* the threshold early-return below and apply on
+    // the next turn regardless of how full the context is. They previously
+    // sat behind that early-return, so a mid-session switch did nothing until
+    // the transcript happened to overflow — which made switching look broken.
+    //
+    // When a switch is pending we return it alone and let compaction wait a
+    // turn: swapping the model invalidates the prompt cache anyway, so a
+    // compaction decision taken against the old model's usage is worth
+    // re-taking on the new one.
+    const nextModel = opts.takeModelSwitch?.() ?? null;
+    const nextThinking = opts.takeThinkingSwitch?.() ?? null;
+    if (nextModel || nextThinking) {
+      if (debug) {
+        console.error(
+          `[compaction] runtime switch: model=${(nextModel as { id?: string } | null)?.id ?? "-"} thinking=${nextThinking ?? "-"}`,
+        );
+      }
+      // No context change — Pi keeps the transcript and swaps runtime state.
+      const update: AgentLoopTurnUpdate = {};
+      if (nextModel) update.model = nextModel;
+      if (nextThinking) update.thinkingLevel = nextThinking;
+      return update;
+    }
+
     if (lastInput === null || lastInput <= threshold) {
       return undefined; // Below threshold — no compaction.
     }
 
     const messages = ctx.context.messages;
-
-    // --- Mid-session model switch (checked before compaction — a switch
-    // invalidates the prompt cache anyway, so compaction decisions based on
-    // the old model's usage should wait for the new model's first turn). ---
-    if (opts.takeModelSwitch) {
-      const next = opts.takeModelSwitch();
-      if (next) {
-        if (debug) {
-          console.error(`[compaction] model switch -> ${(next as { id?: string }).id ?? "?"}`);
-        }
-        // No context change — Pi keeps the transcript and swaps the model.
-        return { model: next };
-      }
-    }
 
     // --- LLM-summary path ---
     // Note: keepRecentMessages bounds TRUNCATION only. Summary mode is

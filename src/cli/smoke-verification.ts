@@ -91,6 +91,7 @@ async function main(): Promise<void> {
     failureReason: null,
     cost: { total: 0, budget: null },
     trustLevel: "high",
+    thinkingLevel: "off",
     completionCriteria: [{ kind: "file_contains", path: "hello.txt", pattern: "export" }],
     lastEvaluation: null,
     maxTurns: null,

@@ -14,7 +14,13 @@ import { ProjectsRegistry } from "./projects.ts";
 import { buildModel, makeStreamFnWithKey, providerEnv } from "./model-resolver.ts";
 import { loadForgeConfig, resolveProvider } from "./config-store.ts";
 import type { ProviderConfig } from "./config-store.ts";
-import type { Session, SessionStatus, TrustLevel, CompletionConfig } from "../types.ts";
+import type {
+  Session,
+  SessionStatus,
+  TrustLevel,
+  ThinkingLevel,
+  CompletionConfig,
+} from "../types.ts";
 import type { SuccessCriterion } from "../core/types/criterion.ts";
 
 type ActiveEntry = {
@@ -50,6 +56,13 @@ export class SessionManager {
    */
   private pendingModels = new Map<string, Model<any>>();
   /**
+   * Mid-session thinking-level switches, keyed by sessionId. Mirrors
+   * `pendingModels`: `switchThinking()` parks the level here and the
+   * prepareNextTurn hook returns it as `AgentLoopTurnUpdate.thinkingLevel` at
+   * the next turn boundary. Consumed at most once per switch.
+   */
+  private pendingThinking = new Map<string, ThinkingLevel>();
+  /**
    * Live completion config per running session — the *same object* handed to
    * the guardrails in `launchAgent`. `makeShouldStopAfterTurn` re-reads
    * `config.completion` at every turn boundary, so mutating `trustLevel` here
@@ -70,6 +83,7 @@ export class SessionManager {
     projectId?: string | undefined;
     providerId?: string | undefined;
     trustLevel?: TrustLevel | undefined;
+    thinkingLevel?: ThinkingLevel | undefined;
     criteria?: SuccessCriterion[] | undefined;
     maxCost?: number | undefined;
     maxTurns?: number | undefined;
@@ -93,7 +107,10 @@ export class SessionManager {
 
     // 3. Session record.
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const trustLevel: TrustLevel = input.trustLevel ?? "low";
+    const trustLevel: TrustLevel = input.trustLevel ?? "medium";
+    // Pi's own default (coding-agent/core/defaults.ts). Only sent when the
+    // model actually supports reasoning — see runAgent's gate.
+    const thinkingLevel: ThinkingLevel = input.thinkingLevel ?? "medium";
     const session: Session = {
       id: sessionId,
       kind: input.kind ?? "task",
@@ -106,6 +123,7 @@ export class SessionManager {
       failureReason: null,
       cost: { total: 0, budget: input.maxCost ?? null },
       trustLevel,
+      thinkingLevel,
       completionCriteria: input.criteria ?? [],
       lastEvaluation: null,
       maxTurns: input.maxTurns ?? null,
@@ -337,6 +355,38 @@ export class SessionManager {
   }
 
   /**
+   * Mid-session thinking-level switch — the reasoning effort sent with each
+   * provider request (`"off"` sends none). Mirrors switchModel(): a running
+   * session parks the level for the next turn boundary, where Pi's loop picks
+   * it up as AgentLoopTurnUpdate.thinkingLevel; an idle one just persists it
+   * for the next resume.
+   *
+   * The level is recorded even when the current model cannot reason — the
+   * session may be switched to one that can. runAgent is what decides whether
+   * to actually send it (a model with `reasoning: false` never does).
+   */
+  async switchThinking(
+    sessionId: string,
+    thinkingLevel: ThinkingLevel,
+  ): Promise<{ thinkingLevel: ThinkingLevel }> {
+    const session = await loadSession(sessionId);
+    if (!session) throw new Error(`session ${sessionId} not found`);
+
+    session.thinkingLevel = thinkingLevel;
+    session.updatedAt = Date.now();
+    await saveSession(session);
+
+    // The running loop holds its own session object — the persisted write
+    // above does not reach it — so hand the level through the pending slot.
+    if (this.active.has(sessionId)) {
+      this.pendingThinking.set(sessionId, thinkingLevel);
+    }
+
+    await appendEvent(sessionId, "THINKING_CHANGED", { thinkingLevel }).catch(() => {});
+    return { thinkingLevel };
+  }
+
+  /**
    * Launch the agent loop on a (possibly recovered) session. Shared by
    * `create()` and `resume()`. The caller owns the CostGuard's lifetime and
    * is responsible for adding the returned entry to `this.active`.
@@ -383,6 +433,14 @@ export class SessionManager {
         if (pending) this.pendingModels.delete(sessionId);
         return pending ?? null;
       },
+      // Starts from the session's persisted level; a mid-run switch arrives
+      // through takeThinkingSwitch instead.
+      thinkingLevel: session.thinkingLevel,
+      takeThinkingSwitch: () => {
+        const pending = this.pendingThinking.get(sessionId);
+        if (pending) this.pendingThinking.delete(sessionId);
+        return pending ?? null;
+      },
     })
       .then((final) => {
         this.settle(sessionId, final, costGuard);
@@ -398,6 +456,7 @@ export class SessionManager {
         }).catch(() => {});
         this.active.delete(sessionId);
         this.completions.delete(sessionId);
+        this.pendingThinking.delete(sessionId);
         throw err;
       });
 
@@ -462,6 +521,8 @@ export class SessionManager {
     // The loop is gone; drop the live reference so switchTrust() cannot mutate
     // a config nobody reads. A resume re-registers a fresh one.
     this.completions.delete(sessionId);
+    // Any switch parked for a turn boundary that never arrived is stale.
+    this.pendingThinking.delete(sessionId);
     const status: SessionStatus = final.failureReason ? "failed" : "completed";
     final.status = status;
     final.cost = { ...final.cost, total: costGuard.getSpent() };

@@ -315,18 +315,51 @@ Every guardrail must have a UI entry point.
 | Session management | SessionList + StatusBar |
 | Project/workspace | Sidebar + project selector |
 | Model config | SettingsPage |
-| Run config (model subscription + verification) | ModelPicker popover — one trigger in Composer (new session) and in SessionView (mid-session); both switch live |
+| Run config (subscription + verification + thinking) | ModelPicker popover — one trigger in Composer (new session) and in SessionView (mid-session); all three switch live |
 | Completion verification | Composer/ModelPicker level select (`low`/`medium`/`high`, labelled 不校验/标准/严格) + VerificationPanel |
+| Reasoning effort | Composer/ModelPicker level select (`thinkingLevel`, labelled 关/极低/低/中/高/极高/最大) — hidden when the model is not a reasoner |
 | Abort/resume | Stop button + Resume button (completed = follow-up) |
+
+The run-config popover holds **three orthogonal axes**. Do not merge them into
+one control or reuse one name for another:
+
+- **Model subscription** — which provider/model answers (`POST /sessions/:id/model`).
+- **Completion verification** — how hard Forge checks the result before calling it done (`POST /sessions/:id/trust`).
+- **Reasoning effort** — how hard the *model* thinks before answering (`POST /sessions/:id/thinking`).
 
 `trustLevel` is the storage/API name for **completion-verification strictness**,
 not model reasoning effort: `low` accepts the model's stop, `medium` runs the
 criteria or the project's `npm test`, `high` adds the deterministic evaluator.
 The raw word never reaches the user — the UI shows 不校验 / 标准 / 严格
 (`desktop/src/lib/verification.ts` is the single source of those labels).
+Default is `medium` (both ends), so a session started by a raw API call is
+verified rather than silently unverified.
 Mid-session switches are `POST /sessions/:id/trust`; the guardrail re-reads
 `config.completion` every turn boundary, so a running session picks the new
 level up on its next turn without a relaunch.
+
+`thinkingLevel` is the reasoning-effort axis (`Session.thinkingLevel`, default
+`medium`; `"off"` means the model is not asked to reason). It rides Pi's own
+`ThinkingLevel` type — Forge does not invent a parallel scale. Wiring, end to
+end: the HTTP handler validates against `THINKING_LEVEL_VALUES` and calls
+`SessionManager.switchThinking`, which persists the level and parks it in the
+`pendingThinking` slot for a running session; `makePrepareNextTurn` drains that
+slot at each turn boundary and returns it as `AgentLoopTurnUpdate.thinkingLevel`;
+`agent-loop.ts` writes it into `config.reasoning`; the protocol adapter
+translates the level into the wire parameter (`thinking.budget_tokens` for
+anthropic-messages, `reasoning.effort` for openai-responses, `reasoning_effort`
+for openai-completions). `runAgent` only sets `config.reasoning` when
+`model.reasoning && level !== "off"` — a non-reasoner sent `high` must go out
+without the field, not with a bogus one.
+The two switch checks must sit **before** the compaction threshold early-return
+in `makePrepareNextTurn`, or mid-session switching only works once the context
+is over budget.
+Which levels a subscription actually supports comes from Pi's
+`getSupportedThinkingLevels` (re-exported by `modelThinkingLevels` in
+`model-resolver.ts`) and is shipped to the UI as `modelCapabilities` on
+`GET /config`; the picker renders only those. `buildModel` must spread the
+catalog entry first (`{ ...catalog, ... }`) — rebuilding the object by hand
+drops `thinkingLevelMap`/`compat`, and the adapter then cannot translate levels.
 
 The transcript is **one ordered timeline**, not parallel message/tool arrays.
 

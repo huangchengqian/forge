@@ -3,17 +3,26 @@
 export type SessionStatus = "running" | "completed" | "failed" | "cancelled";
 export type TrustLevel = "low" | "medium" | "high";
 
+/**
+ * Reasoning effort, mirroring Pi's `ThinkingLevel` (pi-agent-core). `"off"`
+ * sends no reasoning parameter at all. The levels a given model actually
+ * supports are reported by the server per subscription — see
+ * `ForgeConfigData.modelCapabilities`.
+ */
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface Session {
   id: string;
   kind: "conversation" | "task";
   goal: string;
   workspace: string;
   projectId: string | null;
-  model: { provider: string; modelId: string; effort?: string };
+  model: { provider: string; modelId: string };
   status: SessionStatus;
   failureReason: string | null;
   cost: { total: number; budget: number | null };
   trustLevel: TrustLevel;
+  thinkingLevel: ThinkingLevel;
   maxTurns: number | null;
   createdAt: number;
   updatedAt: number;
@@ -33,6 +42,13 @@ export interface ForgeConfigData {
   version: number;
   providers: ProviderConfig[];
   defaultProviderId: string;
+  /**
+   * Derived by the server (never persisted): the thinking levels each
+   * subscription's model actually supports, keyed by provider id. The picker
+   * offers only these, so a level that would no-op is never shown. Optional
+   * so a config from an older server still parses.
+   */
+  modelCapabilities?: Record<string, ThinkingLevel[]>;
 }
 
 export interface ProjectRecord {
@@ -125,4 +141,6 @@ export interface ConversationView {
   modelId: string | null;
   /** Updated by TRUST_CHANGED events (mid-session verification switch). */
   trustLevel: TrustLevel | null;
+  /** Updated by THINKING_CHANGED events (mid-session reasoning switch). */
+  thinkingLevel: ThinkingLevel | null;
 }

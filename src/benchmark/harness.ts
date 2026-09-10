@@ -81,6 +81,7 @@ export async function runGoldenTask(task: GoldenTask): Promise<TaskReport> {
       failureReason: null,
       cost: { total: 0, budget: null },
       trustLevel: task.trustLevel,
+      thinkingLevel: "off",
       completionCriteria: task.criteria,
       lastEvaluation: null,
       maxTurns: null,

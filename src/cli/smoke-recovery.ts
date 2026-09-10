@@ -106,6 +106,7 @@ async function main(): Promise<void> {
       failureReason: "simulated failure",
       cost: { total: 0.123, budget: 1.0 }, // ← spend to test hydrate
       trustLevel: "low",
+      thinkingLevel: "off",
       completionCriteria: [],
       lastEvaluation: null,
       maxTurns: null,

@@ -6,6 +6,7 @@ import type {
   ForgeConfigData,
   ProjectRecord,
   Session,
+  ThinkingLevel,
 } from "../types.ts";
 
 export type DesktopConfig = { baseUrl: string; token: string };
@@ -53,6 +54,7 @@ export async function createSession(input: {
   projectId?: string;
   providerId?: string;
   trustLevel: "low" | "medium" | "high";
+  thinkingLevel?: ThinkingLevel;
   criteria?: Array<{ kind: string; [k: string]: unknown }>;
   maxCost?: number;
   maxTurns?: number;
@@ -91,6 +93,15 @@ export async function switchTrust(
   trustLevel: "low" | "medium" | "high",
 ): Promise<{ trustLevel: string }> {
   return send(`/sessions/${id}/trust`, "POST", { trustLevel });
+}
+
+/** Reasoning effort (Pi's thinking level). Running sessions pick it up at the
+ * next turn boundary; idle ones persist it for the next resume. */
+export async function switchThinking(
+  id: string,
+  thinkingLevel: ThinkingLevel,
+): Promise<{ thinkingLevel: string }> {
+  return send(`/sessions/${id}/thinking`, "POST", { thinkingLevel });
 }
 
 export async function deleteSession(id: string): Promise<void> {

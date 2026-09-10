@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { ProviderConfig, TrustLevel } from "../types.ts";
+import type { ProviderConfig, ThinkingLevel, TrustLevel } from "../types.ts";
 import { TRUST_LEVELS, trustLabel } from "../lib/verification.ts";
+import { thinkingLabel, thinkingMeta } from "../lib/thinking.ts";
 
 /** Small inline check — drawn rather than typed so it sits on the text
  * baseline instead of reading as a glyph. */
@@ -59,6 +60,9 @@ export function ModelPicker({
   onSelectModel,
   trustLevel,
   onSelectTrust,
+  thinkingLevel,
+  thinkingLevels,
+  onSelectThinking,
   placement = "above",
   disabled = false,
   defaultOpen = false,
@@ -72,6 +76,11 @@ export function ModelPicker({
   onSelectModel: (providerId: string) => void;
   trustLevel: TrustLevel;
   onSelectTrust: (level: TrustLevel) => void;
+  thinkingLevel: ThinkingLevel;
+  /** Levels the current model actually supports, from the server's per-model
+   * `modelCapabilities`. A model with no reasoning support yields ["off"]. */
+  thinkingLevels: ThinkingLevel[];
+  onSelectThinking: (level: ThinkingLevel) => void;
   /** Which way the panel opens. Composers sit at the bottom → "above". */
   placement?: "above" | "below";
   disabled?: boolean;
@@ -83,6 +92,9 @@ export function ModelPicker({
 
   const active = providers.find((p) => p.id === activeProviderId) ?? null;
   const modelLabel = active?.modelId ?? activeModelLabel ?? "未选择模型";
+  // "off" alone means the model has no reasoning support — then the group is
+  // an explanatory line, not a choice, and the trigger stays quiet about it.
+  const reasoningSupported = thinkingLevels.some((l) => l !== "off");
 
   useEffect(() => {
     if (!open) return;
@@ -114,6 +126,12 @@ export function ModelPicker({
         <span className="picker-model">{modelLabel}</span>
         <span className="picker-dot" aria-hidden="true" />
         <span className="picker-trust">{trustLabel(trustLevel)}</span>
+        {reasoningSupported && (
+          <>
+            <span className="picker-dot" aria-hidden="true" />
+            <span className="picker-thinking">{thinkingLabel(thinkingLevel)}</span>
+          </>
+        )}
         <span className={`picker-caret${open ? " is-open" : ""}`}>
           <CaretIcon />
         </span>
@@ -177,6 +195,40 @@ export function ModelPicker({
                 </button>
               );
             })}
+          </div>
+
+          <div className="picker-rule" />
+
+          <div className="picker-group">
+            <div className="picker-group-label">思考强度</div>
+            {!reasoningSupported ? (
+              <div className="picker-empty">当前模型不支持推理，不会发送推理参数</div>
+            ) : (
+              thinkingLevels.map((level) => {
+                const meta = thinkingMeta(level);
+                const on = level === thinkingLevel;
+                return (
+                  <button
+                    key={level}
+                    type="button"
+                    className="picker-option"
+                    data-active={on || undefined}
+                    role="option"
+                    aria-selected={on}
+                    onClick={() => {
+                      if (!on) onSelectThinking(level);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="picker-mark">{on && <CheckIcon />}</span>
+                    <span className="picker-option-body">
+                      <span className="picker-option-label">{meta.label}</span>
+                      {meta.hint && <span className="picker-option-hint">{meta.hint}</span>}
+                    </span>
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
       )}

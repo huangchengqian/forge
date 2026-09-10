@@ -2,11 +2,13 @@ import { create } from "zustand";
 import { getCfg } from "./api.ts";
 import { notifyTaskOutcome, outcomeFromTerminal } from "./notify.ts";
 import { trustLabel } from "./verification.ts";
+import { thinkingLabel } from "./thinking.ts";
 import type {
   ApprovalRecordView,
   ConversationView,
   EventEnvelope,
   Session,
+  ThinkingLevel,
   TrustLevel,
   VerificationView,
 } from "../types.ts";
@@ -30,6 +32,7 @@ export interface DesktopState {
     projectId?: string;
     providerId?: string;
     trustLevel: TrustLevel;
+    thinkingLevel?: ThinkingLevel;
     criteria?: Array<{ kind: string; [k: string]: unknown }>;
     maxTurns?: number;
   }) => Promise<void>;
@@ -53,6 +56,7 @@ const emptyConversation = (): ConversationView => ({
   costBudget: null,
   modelId: null,
   trustLevel: null,
+  thinkingLevel: null,
 });
 
 let source: EventSource | null = null;
@@ -327,6 +331,19 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
         tone: "info",
         icon: "✓",
         text: `完成验证改为「${trustLabel(level)}」—— 从下一轮开始生效。`,
+      });
+      return { conversation };
+    }
+
+    case "THINKING_CHANGED": {
+      const level = String(payload.thinkingLevel ?? "");
+      conversation.thinkingLevel = level as ConversationView["thinkingLevel"];
+      conversation.timeline = upsert(conversation.timeline, {
+        kind: "notice",
+        id: `thinking-${stamp}`,
+        tone: "info",
+        icon: "◐",
+        text: `思考强度改为「${thinkingLabel(level)}」—— 从下一轮开始生效。`,
       });
       return { conversation };
     }

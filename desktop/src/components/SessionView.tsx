@@ -3,7 +3,7 @@ import { store } from "../lib/store.ts";
 import { fetchConfig } from "../lib/api.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
-import type { ProviderConfig, TimelineEntry, TrustLevel } from "../types.ts";
+import type { ProviderConfig, ThinkingLevel, TimelineEntry, TrustLevel } from "../types.ts";
 
 /** One-line argument summary for a tool row (the full JSON lives behind expand). */
 function summarizeArgs(args: unknown): string {
@@ -108,13 +108,22 @@ function EmptyConversation({ running }: { running: boolean }) {
   );
 }
 
-export function SessionView({ sessionId, goal, status, failureReason, modelId, trustLevel }: {
+export function SessionView({
+  sessionId,
+  goal,
+  status,
+  failureReason,
+  modelId,
+  trustLevel,
+  thinkingLevel,
+}: {
   sessionId: string;
   goal: string;
   status: string;
   failureReason: string | null;
   modelId: string;
   trustLevel: TrustLevel;
+  thinkingLevel: ThinkingLevel;
 }) {
   const conversation = store((s) => s.conversation);
   const connected = store((s) => s.connected);
@@ -128,6 +137,8 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resumeMessage, setResumeMessage] = useState("");
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  /** Thinking levels each subscription's model supports, per the server. */
+  const [capabilities, setCapabilities] = useState<Record<string, ThinkingLevel[]>>({});
   const running = status === "running";
   const resumable = status === "failed" || status === "cancelled";
   const canFollowUp = status === "completed";
@@ -135,9 +146,13 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
   const effectiveModelId = conversation.modelId ?? modelId;
   // TRUST_CHANGED events do the same for the verification level.
   const effectiveTrust: TrustLevel = conversation.trustLevel ?? trustLevel;
+  // THINKING_CHANGED events do the same for the reasoning effort.
+  const effectiveThinking: ThinkingLevel = conversation.thinkingLevel ?? thinkingLevel;
   // Provider id behind the effective model (the picker is keyed by provider).
   const activeProviderId =
     providers.find((p) => p.modelId === effectiveModelId)?.id ?? null;
+  // Levels the running model actually supports (server-derived).
+  const thinkingLevels = (activeProviderId ? capabilities[activeProviderId] : undefined) ?? ["off"];
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -146,7 +161,10 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
 
   useEffect(() => {
     void fetchConfig()
-      .then((cfg) => setProviders(cfg.providers))
+      .then((cfg) => {
+        setProviders(cfg.providers);
+        setCapabilities(cfg.modelCapabilities ?? {});
+      })
       .catch(() => {});
   }, []);
 
@@ -192,6 +210,18 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
       await switchTrust(sessionId, level);
     } catch (err) {
       console.error("verification switch failed:", err);
+    }
+  };
+
+  // Reasoning-effort switch. Same contract as verification: applied at the
+  // next turn boundary, echoed back as THINKING_CHANGED.
+  const onThinkingSwitch = async (level: ThinkingLevel) => {
+    if (level === effectiveThinking) return;
+    try {
+      const { switchThinking } = await import("../lib/api.ts");
+      await switchThinking(sessionId, level);
+    } catch (err) {
+      console.error("thinking switch failed:", err);
     }
   };
 
@@ -387,6 +417,9 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
                   onSelectModel={(id) => void onModelSwitch(id)}
                   trustLevel={effectiveTrust}
                   onSelectTrust={(level) => void onTrustSwitch(level)}
+                  thinkingLevel={effectiveThinking}
+                  thinkingLevels={thinkingLevels}
+                  onSelectThinking={(level) => void onThinkingSwitch(level)}
                   placement="above"
                 />
                 {!connected && (

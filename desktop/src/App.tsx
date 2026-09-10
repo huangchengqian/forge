@@ -71,6 +71,7 @@ export function App() {
             failureReason={activeSession.failureReason}
             modelId={activeSession.model?.modelId ?? ""}
             trustLevel={activeSession.trustLevel}
+            thinkingLevel={activeSession.thinkingLevel}
           />
         ) : (
           <Composer projectId={activeProjectId} />

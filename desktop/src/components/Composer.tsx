@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { store } from "../lib/store.ts";
 import { fetchConfig } from "../lib/api.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
-import type { ProviderConfig, TrustLevel } from "../types.ts";
+import type { ProviderConfig, ThinkingLevel, TrustLevel } from "../types.ts";
 
 /** Parse the compact criteria syntax: "file_exists:hello.txt" or
  * "file_contains:hello.txt:export" (kind:path[:pattern]). Empty → none. */
@@ -30,17 +30,25 @@ export function Composer({ projectId }: { projectId?: string | null }) {
   const error = store((s) => s.error);
   const [goal, setGoal] = useState("");
   const [trust, setTrust] = useState<TrustLevel>("medium");
+  const [thinking, setThinking] = useState<ThinkingLevel>("medium");
   const [criteriaLine, setCriteriaLine] = useState("");
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [providerId, setProviderId] = useState<string | null>(null);
+  /** Thinking levels each subscription's model supports, per the server. */
+  const [capabilities, setCapabilities] = useState<Record<string, ThinkingLevel[]>>({});
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     void fetchConfig().then((cfg) => {
       setProviders(cfg.providers);
       setProviderId(cfg.defaultProviderId || cfg.providers[0]?.id || null);
+      setCapabilities(cfg.modelCapabilities ?? {});
     }).catch(() => {});
   }, []);
+
+  // Until the server tells us otherwise, assume no reasoning support — the
+  // picker then says so instead of offering levels that would do nothing.
+  const thinkingLevels = (providerId ? capabilities[providerId] : undefined) ?? ["off"];
 
   // Grow with the content instead of reserving three fixed rows.
   useEffect(() => {
@@ -57,6 +65,7 @@ export function Composer({ projectId }: { projectId?: string | null }) {
       ...(projectId ? { projectId } : {}),
       ...(providerId ? { providerId } : {}),
       trustLevel: trust,
+      thinkingLevel: thinking,
       ...(trust === "high" ? { criteria: parseCriteria(criteriaLine) } : {}),
     });
     setGoal("");
@@ -96,6 +105,9 @@ export function Composer({ projectId }: { projectId?: string | null }) {
                 onSelectModel={setProviderId}
                 trustLevel={trust}
                 onSelectTrust={setTrust}
+                thinkingLevel={thinking}
+                thinkingLevels={thinkingLevels}
+                onSelectThinking={setThinking}
                 placement="above"
               />
               {trust === "high" && (
