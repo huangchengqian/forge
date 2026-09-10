@@ -4,6 +4,6 @@
     "rootDir": ".",
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "benchmark/**/*.ts"],
-  "exclude": ["node_modules", "dist", "pi", "ui"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "pi"]
 }

@@ -2,12 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import {
-  validate,
-  verifyCriteria,
-} from "../verification/index.ts";
-import { validateCommandExitZero } from "../verification/validate.ts";
-import type { SuccessCriterion } from "../core/types/criterion.ts";
+import { validate, validateCommandExitZero } from "./validate.ts";
 
 const TMP = "/tmp/forge-verify-tests";
 
@@ -127,47 +122,5 @@ describe("workspace confinement", () => {
     const r = await validate({ kind: "file_exists", path: "../outside.txt" }, TMP);
     assert.equal(r.passed, false);
     assert.match(r.message, /escapes the task workspace/);
-  });
-});
-
-describe("verifyCriteria (multiple criteria)", () => {
-  test("pass when all criteria pass", async () => {
-    await writeFile(join(TMP, "multi.ts"), 'const y = "hello world";\n', "utf8");
-    const criteria = [
-      { kind: "file_exists", path: "multi.ts" },
-      { kind: "file_contains", path: "multi.ts", pattern: "hello world" },
-      { kind: "file_not_contains", path: "multi.ts", pattern: "forbidden" },
-    ] as SuccessCriterion[];
-    const v = await verifyCriteria("step-1", criteria, TMP);
-    assert.equal(v.passed, true);
-    assert.equal(v.failed.length, 0);
-    assert.equal(v.criteriaResults.length, 3);
-    assert.equal(v.metadata.total, 3);
-    assert.equal(v.metadata.failedCount, 0);
-  });
-
-  test("fail when any criterion fails", async () => {
-    await writeFile(join(TMP, "multi2.ts"), 'const z = "nope";\n', "utf8");
-    const criteria = [
-      { kind: "file_exists", path: "multi2.ts" },
-      { kind: "file_contains", path: "multi2.ts", pattern: "hello world" },
-      { kind: "file_not_contains", path: "multi2.ts", pattern: "nope" },
-    ] as SuccessCriterion[];
-    const v = await verifyCriteria("step-1", criteria, TMP);
-    assert.equal(v.passed, false);
-    assert.equal(v.failed.length, 2);
-    assert.equal(v.reasons.length, 2);
-    assert.equal(v.metadata.failedCount, 2);
-  });
-});
-
-describe("retry compatibility", () => {
-  test("verifyCriteria is callable multiple times (idempotent per invocation)", async () => {
-    await writeFile(join(TMP, "retry.ts"), "x\n", "utf8");
-    const criteria = [{ kind: "file_exists", path: "retry.ts" }] as SuccessCriterion[];
-    const v1 = await verifyCriteria("step-1", criteria, TMP);
-    const v2 = await verifyCriteria("step-1", criteria, TMP);
-    assert.equal(v1.passed, true);
-    assert.equal(v2.passed, true);
   });
 });

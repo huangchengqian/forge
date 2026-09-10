@@ -1,10 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
-
-export const TASKS_DIR = resolve(
-  process.env.FORGE_TASKS_DIR ?? join(process.env.HOME ?? "/tmp", ".forge", "tasks"),
-);
+import { dirname } from "node:path";
 
 export async function readJsonFile<T>(path: string): Promise<T> {
   const text = await readFile(path, "utf8");
@@ -20,8 +16,4 @@ export async function writeJsonFileAtomic(path: string, value: unknown): Promise
   await writeFile(tmp, JSON.stringify(value, null, 2) + "\n", "utf8");
   const { rename } = await import("node:fs/promises");
   await rename(tmp, path);
-}
-
-export function taskPath(id: string): string {
-  return join(TASKS_DIR, `${id}.json`);
 }

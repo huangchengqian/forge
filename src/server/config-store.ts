@@ -33,47 +33,19 @@ export type ProviderConfig = {
   baseUrl: string;
 };
 
-/** A vendor preset: pins a protocol to a baseUrl + suggested model. */
-export type ProviderPreset = {
-  id: string;
-  label: string;
-  api: ProviderApi;
-  baseUrl: string;
-  defaultModel: string;
-};
-
-/**
- * Known vendor presets, grouped by protocol. Model ids and base URLs are
- * taken from Pi's provider model tables (packages/ai/src/providers/data).
- * Google and other non-standard protocols are intentionally omitted: Forge's
- * custom path supports only the three protocols above.
- */
-export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
-  { id: "anthropic", label: "Anthropic", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-6" },
-  { id: "minimax", label: "MiniMax", api: "anthropic-messages", baseUrl: "https://api.minimax.io/anthropic", defaultModel: "MiniMax-M3" },
-  { id: "minimax-cn", label: "MiniMax (国内)", api: "anthropic-messages", baseUrl: "https://api.minimaxi.com/anthropic", defaultModel: "MiniMax-M3" },
-  { id: "kimi-coding", label: "Kimi (coding)", api: "anthropic-messages", baseUrl: "https://api.kimi.com/coding", defaultModel: "kimi-for-coding" },
-  { id: "openai", label: "OpenAI", api: "openai-responses", baseUrl: "https://api.openai.com/v1", defaultModel: "gpt-5" },
-  { id: "deepseek", label: "DeepSeek", api: "openai-completions", baseUrl: "https://api.deepseek.com", defaultModel: "deepseek-v4-pro" },
-  { id: "moonshotai", label: "Moonshot (Kimi)", api: "openai-completions", baseUrl: "https://api.moonshot.ai/v1", defaultModel: "kimi-k2.5" },
-  { id: "groq", label: "Groq", api: "openai-completions", baseUrl: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile" },
-];
-
 export type ForgeConfig = {
   version: 2;
   providers: ProviderConfig[];
   defaultProviderId: string | null;
-  maxConcurrency: number;
 };
 
 const DEFAULT_CONFIG: ForgeConfig = {
   version: 2,
   providers: [],
   defaultProviderId: null,
-  maxConcurrency: 2,
 };
 
-export function newProviderId(): string {
+function newProviderId(): string {
   return randomUUID();
 }
 
@@ -100,7 +72,6 @@ export async function loadForgeConfig(forgeHome: string): Promise<ForgeConfig> {
     const raw = await readFile(configPath(forgeHome), "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object") return { ...DEFAULT_CONFIG };
-    const maxConcurrency = typeof parsed.maxConcurrency === "number" ? parsed.maxConcurrency : 2;
 
     // v2: `providers[]`. Validate each entry; drop malformed ones.
     if (Array.isArray(parsed.providers)) {
@@ -112,7 +83,6 @@ export async function loadForgeConfig(forgeHome: string): Promise<ForgeConfig> {
         version: 2,
         providers,
         defaultProviderId: providers.some((p) => p.id === defaultId) ? defaultId : (providers[0]?.id ?? null),
-        maxConcurrency,
       };
     }
 
@@ -123,7 +93,6 @@ export async function loadForgeConfig(forgeHome: string): Promise<ForgeConfig> {
       version: 2,
       providers,
       defaultProviderId: legacy?.id ?? null,
-      maxConcurrency,
     };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { ...DEFAULT_CONFIG };
@@ -137,11 +106,6 @@ export async function saveForgeConfig(forgeHome: string, config: ForgeConfig): P
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", "utf8");
   await rename(tmp, p);
-}
-
-export async function isConfigured(forgeHome: string): Promise<boolean> {
-  const cfg = await loadForgeConfig(forgeHome);
-  return cfg.providers.some((p) => p.apiKey.length > 0);
 }
 
 export function validateProvider(p: unknown): ProviderConfig | null {

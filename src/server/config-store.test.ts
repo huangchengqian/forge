@@ -2,7 +2,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { loadForgeConfig, saveForgeConfig, validateProvider, resolveProvider, PROVIDER_PRESETS } from "./config-store.ts";
+import { loadForgeConfig, saveForgeConfig, validateProvider, resolveProvider } from "./config-store.ts";
 
 const TMP = "/tmp/forge-config-store-tests";
 const HOME = join(TMP, "home");
@@ -49,7 +49,6 @@ describe("resolveProvider", () => {
       { id: "b", api: "openai-completions" as const, apiKey: "k2", modelId: "m2", baseUrl: "https://b" },
     ],
     defaultProviderId: "a",
-    maxConcurrency: 2,
   };
 
   test("explicit providerId wins", () => {
@@ -64,19 +63,6 @@ describe("resolveProvider", () => {
   });
   test("null when no providers", () => {
     assert.equal(resolveProvider({ ...cfg, providers: [], defaultProviderId: null }), null);
-  });
-});
-
-describe("presets", () => {
-  test("presets pin protocol + baseUrl + default model", () => {
-    const mini = PROVIDER_PRESETS.find((p) => p.id === "minimax");
-    assert.equal(mini?.api, "anthropic-messages");
-    assert.equal(mini?.baseUrl, "https://api.minimax.io/anthropic");
-    assert.equal(mini?.defaultModel, "MiniMax-M3");
-    const openai = PROVIDER_PRESETS.find((p) => p.id === "openai");
-    assert.equal(openai?.api, "openai-responses");
-    const deepseek = PROVIDER_PRESETS.find((p) => p.id === "deepseek");
-    assert.equal(deepseek?.api, "openai-completions");
   });
 });
 
@@ -125,11 +111,10 @@ describe("legacy config migration", () => {
       { id: "a", api: "anthropic-messages" as const, apiKey: "k1", modelId: "claude-sonnet-4-6", baseUrl: "https://api.anthropic.com" },
       { id: "b", api: "openai-completions" as const, apiKey: "k2", modelId: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com" },
     ];
-    await saveForgeConfig(HOME, { version: 2, providers, defaultProviderId: "b", maxConcurrency: 3 });
+    await saveForgeConfig(HOME, { version: 2, providers, defaultProviderId: "b" });
     const cfg = await loadForgeConfig(HOME);
     assert.equal(cfg.providers.length, 2);
     assert.equal(cfg.defaultProviderId, "b");
     assert.deepEqual(resolveProvider(cfg), providers[1]);
-    assert.equal(cfg.maxConcurrency, 3);
   });
 });
