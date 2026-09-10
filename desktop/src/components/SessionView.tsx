@@ -48,13 +48,13 @@ function VerificationPanel() {
   if (verification.length === 0) return null;
   const last = verification[verification.length - 1]!;
   return (
-    <div className="card">
-      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
+    <div className="card" style={{ borderColor: last.passed ? "color-mix(in srgb, var(--green) 40%, var(--border))" : "color-mix(in srgb, var(--red) 40%, var(--border))" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6, letterSpacing: "0.05em", textTransform: "uppercase" }}>
         Verification
       </div>
       {verification.map((v, i) => (
         <div key={i} style={{ display: "flex", gap: 8, fontSize: 12.5, padding: "2px 0" }}>
-          <span style={{ color: v.passed ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
+          <span style={{ color: v.passed ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
             {v.passed ? "PASS" : "FAIL"}
           </span>
           <span style={{ color: "var(--text-secondary)" }}>
@@ -82,64 +82,56 @@ function CostGauge({ spent, budget }: { spent: number; budget: number | null }) 
   );
 }
 
-function StuckWarning() {
-  const stuck = store((s) => s.conversation.stuck);
-  if (!stuck) return null;
+/** Shared visual language for session-level notices. */
+function Notice({ tone, icon, children }: { tone: "info" | "ok" | "warn"; icon: string; children: React.ReactNode }) {
+  const color = tone === "ok" ? "var(--green)" : tone === "warn" ? "var(--yellow)" : "var(--accent)";
   return (
     <div
       style={{
         margin: "10px 0",
         padding: "8px 12px",
-        border: "1px solid var(--yellow)",
+        border: `1px solid color-mix(in srgb, ${color} 45%, var(--border))`,
+        borderLeft: `3px solid ${color}`,
         borderRadius: 8,
-        color: "var(--yellow)",
+        color: "var(--text-secondary)",
         fontSize: 12.5,
+        background: `color-mix(in srgb, ${color} 6%, transparent)`,
       }}
     >
-      ⚠ Stuck: {stuck.pattern} ×{stuck.repetitions} — the session is being terminated to protect your budget.
+      {icon} {children}
     </div>
   );
 }
 
-/** Shown once a COMPACTION event arrives — the model's view of history just changed. */
 function CompactionNotice() {
   const compaction = store((s) => s.conversation.compaction);
   if (!compaction) return null;
   return (
-    <div
-      style={{
-        margin: "10px 0",
-        padding: "8px 12px",
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        color: "var(--text-secondary)",
-        fontSize: 12.5,
-      }}
-    >
-      ✦ Context compacted ({compaction.mode}) — older history was summarized into a checkpoint.
-      The model's view of the conversation changed; behaviour may differ slightly.
-    </div>
+    <Notice tone="info" icon="✦">
+      Context compacted ({compaction.mode}) — older history was summarized into a
+      checkpoint. The model's view of the conversation changed; behaviour may differ slightly.
+    </Notice>
   );
 }
 
-/** Shown when the stream replays a SESSION_RESUMED marker. */
 function ResumedNotice() {
   const resumed = store((s) => s.conversation.resumed);
   if (!resumed) return null;
   return (
-    <div
-      style={{
-        margin: "10px 0",
-        padding: "8px 12px",
-        border: "1px solid var(--green)",
-        borderRadius: 8,
-        color: "var(--green)",
-        fontSize: 12.5,
-      }}
-    >
-      ↻ Resumed — recovered {resumed.messagesRecovered} message
+    <Notice tone="ok" icon="↻">
+      Resumed — recovered {resumed.messagesRecovered} message
       {resumed.messagesRecovered === 1 ? "" : "s"} from the event log.
-    </div>
+    </Notice>
+  );
+}
+
+function StuckWarning() {
+  const stuck = store((s) => s.conversation.stuck);
+  if (!stuck) return null;
+  return (
+    <Notice tone="warn" icon="⚠">
+      Stuck: {stuck.pattern} ×{stuck.repetitions} — the session is being terminated to protect your budget.
+    </Notice>
   );
 }
 
@@ -148,8 +140,9 @@ function EmptyConversation() {
   const conversation = store((s) => s.conversation);
   if (conversation.messages.length > 0 || conversation.toolCalls.length > 0) return null;
   return (
-    <div style={{ margin: "32px 0", color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
-      No messages yet. The agent hasn't produced any output for this session.
+    <div style={{ margin: "48px 0", color: "var(--text-muted)", fontSize: 13.5, textAlign: "center" }}>
+      <div style={{ fontSize: 26, marginBottom: 10, opacity: 0.5 }}>◌</div>
+      No messages yet — the agent hasn't produced any output for this session.
     </div>
   );
 }
@@ -192,7 +185,6 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
     try {
       const { switchModel } = await import("../lib/api.ts");
       await switchModel(sessionId, providerId);
-      setProviders((ps) => [...ps]); // no-op refresh; MODEL_CHANGED drives the UI
     } catch (err) {
       console.error("model switch failed:", err);
     }
@@ -308,18 +300,24 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 28px" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto", paddingBottom: 24 }}>
+      <div className="conversation-scroll">
+        <div className="conversation-canvas">
           <ResumedNotice />
           <EmptyConversation />
-          {conversation.messages.map((m, i) => (
-            <div key={i} style={{ margin: "16px 0" }}>
-              <div className="role-label">{m.role === "user" ? "You" : "Agent"}</div>
-              <div style={{ color: m.role === "user" ? "var(--text)" : undefined }}>
-                <Markdown text={m.text} />
+          {conversation.messages.map((m, i) =>
+            m.role === "user" ? (
+              <div key={i} className="message message-user">
+                <div className="message-user-body">{m.text}</div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div key={i} className="message message-agent">
+                <div className="role-label">Agent</div>
+                <div className="md">
+                  <Markdown text={m.text} />
+                </div>
+              </div>
+            ),
+          )}
 
           {conversation.toolCalls.map((call) => (
             <ToolRow key={call.toolCallId} call={call} />
@@ -330,9 +328,9 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
           <StuckWarning />
 
           {failureReason && (
-            <div style={{ color: "var(--red)", fontSize: 12.5, margin: "10px 0" }}>
+            <Notice tone="warn" icon="✕">
               Session failed: {failureReason}
-            </div>
+            </Notice>
           )}
           <div ref={endRef} />
         </div>
@@ -344,8 +342,8 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
         </div>
       )}
 
-      <div style={{ borderTop: "1px solid var(--border)", padding: "12px 28px 16px" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+      <div className="conversation-composer-wrap">
+        <div className="conversation-composer">
           <div className="composer-box" style={{ padding: "10px 12px 8px" }}>
             <textarea
               className="composer-ta"
@@ -369,33 +367,33 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
             />
             <div className="composer-actions" style={{ justifyContent: "space-between" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select
-                className="composer-model-select"
-                value={providers.some((p) => p.modelId === effectiveModelId)
-                  ? providers.find((p) => p.modelId === effectiveModelId)!.id
-                  : ""}
-                onChange={(e) => void onModelSwitch(e.target.value)}
-                title="Model subscription — switching takes effect at the next turn boundary"
-              >
-                {!providers.some((p) => p.modelId === effectiveModelId) && (
-                  <option value="">{effectiveModelId || "no model"}</option>
-                )}
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.modelId}
-                  </option>
-                ))}
-              </select>
-              <span className="chip" title="completion verification level for this session">
-                trust: {trustLevel}
-              </span>
-              {!connected && (
-                <span className="chip" title="live event stream reconnecting…">
-                  <span className="dot" style={{ background: "var(--yellow)" }} />
-                  reconnecting
+                <select
+                  className="composer-model-select"
+                  value={providers.some((p) => p.modelId === effectiveModelId)
+                    ? providers.find((p) => p.modelId === effectiveModelId)!.id
+                    : ""}
+                  onChange={(e) => void onModelSwitch(e.target.value)}
+                  title="Model subscription — switching takes effect at the next turn boundary"
+                >
+                  {!providers.some((p) => p.modelId === effectiveModelId) && (
+                    <option value="">{effectiveModelId || "no model"}</option>
+                  )}
+                  {providers.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.modelId}
+                    </option>
+                  ))}
+                </select>
+                <span className="chip" title="completion verification level for this session">
+                  trust: {trustLevel}
                 </span>
-              )}
-            </div>
+                {!connected && (
+                  <span className="chip" title="live event stream reconnecting…">
+                    <span className="dot" style={{ background: "var(--yellow)" }} />
+                    reconnecting
+                  </span>
+                )}
+              </div>
               <button
                 className="btn btn-primary btn-small"
                 onClick={() => void send()}

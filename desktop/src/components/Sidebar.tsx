@@ -70,6 +70,7 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
     <div className="sidebar">
       {/* macOS traffic lights overlay this strip — keep it clear of content. */}
       <div className="sidebar-drag" />
+      <div className="sidebar-brand">Forge<span>.</span></div>
 
       <div className="side-header-row" style={{ marginTop: 4 }}>
         <div className="side-section-label">Project</div>

@@ -56,7 +56,7 @@ export function App() {
   const activeProjectId = activeSession?.projectId ?? undefined;
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+    <div className="app-root">
       <Sidebar onNewSession={() => store.getState().select(null)} />
       <main
         className="app-main"

@@ -16,6 +16,13 @@ function parseCriteria(input: string): Array<{ kind: string; [k: string]: unknow
   return [];
 }
 
+const SUGGESTIONS = [
+  "Create hello.ts exporting a hello() function",
+  "Write unit tests for the existing code",
+  "Refactor the messiest file in this repo",
+  "Explain what this project does",
+];
+
 export function Composer({ projectId }: { projectId?: string | null }) {
   const createSession = store((s) => s.createSession);
   const loading = store((s) => s.loading);
@@ -47,19 +54,22 @@ export function Composer({ projectId }: { projectId?: string | null }) {
   };
 
   return (
-    <div style={{ maxWidth: 720, margin: "18vh auto 0", padding: "0 24px" }}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>
-        What should Forge do?
+    <div style={{ maxWidth: 720, margin: "14vh auto 0", padding: "0 24px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
+        <span style={{ fontSize: 24, fontWeight: 750, color: "var(--text)", letterSpacing: "-0.02em" }}>
+          What should Forge do?
+        </span>
       </div>
-      <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 14 }}>
+      <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
         The agent reads, writes and runs commands in your project. Completion is verified before it's called done.
       </div>
-      <div className="composer-box">
+      <div className="composer-box" style={{ padding: "12px 14px 9px" }}>
         <textarea
           className="composer-ta"
-          placeholder="Describe the engineering task…  (Enter to start · Shift+Enter for a new line)"
+          placeholder="Describe the engineering task…"
           value={goal}
           rows={3}
+          autoFocus
           onChange={(e) => setGoal(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -109,6 +119,20 @@ export function Composer({ projectId }: { projectId?: string | null }) {
         </div>
       </div>
       {error && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 8 }}>{error}</div>}
+      <div className="suggestion-row" style={{ justifyContent: "flex-start", marginTop: 12 }}>
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s}
+            className="suggestion-chip"
+            onClick={() => {
+              setGoal(s);
+              document.querySelector<HTMLTextAreaElement>(".composer-ta")?.focus();
+            }}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

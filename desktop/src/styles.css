@@ -212,9 +212,15 @@ body {
   width: 260px; flex-shrink: 0; height: 100vh;
   display: flex; flex-direction: column;
   padding: 0 10px 10px; box-sizing: border-box; overflow-y: auto;
+  background: var(--bg-sidebar);
 }
 /* Title-bar drag row: the macOS traffic lights overlay this area. */
 .sidebar-drag { height: 36px; flex-shrink: 0; }
+.sidebar-brand {
+  font-size: 13px; font-weight: 750; color: var(--text);
+  letter-spacing: 0.02em; padding: 2px 10px 10px; opacity: 0.9;
+}
+.sidebar-brand span { color: var(--accent); }
 
 /* Sidebar section headers (Project / Sessions), ZCode-style. */
 .side-section-label {
@@ -414,3 +420,35 @@ body {
   transition: border-color 0.12s, color 0.12s;
 }
 .suggestion-chip:hover { border-color: var(--accent); color: var(--text); }
+
+/* --- tool call detail (expanded) --- */
+.tool-detail {
+  width: 100%; margin: 4px 0 0; padding: 8px 10px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+  color: var(--text-secondary); white-space: pre-wrap; overflow-x: auto; box-sizing: border-box;
+}
+
+/* --- modal (resume dialog, confirmations) --- */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  width: min(460px, 90vw); background: var(--bg-secondary);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: 18px 20px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  animation: toast-in 0.16s ease-out;
+}
+.modal h3 { font-size: 15px; margin-bottom: 8px; color: var(--text); }
+.composer-textarea {
+  font-family: inherit; font-size: 13px; line-height: 1.55;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  resize: vertical; outline: none; box-sizing: border-box;
+}
+.composer-textarea:focus { border-color: var(--accent); }
+
+/* Sidebar + main layering: main panel floats over the sidebar tone. */
+.app-root { background: var(--bg-sidebar); display: flex; height: 100vh; overflow: hidden; }
