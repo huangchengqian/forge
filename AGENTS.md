@@ -315,9 +315,18 @@ Every guardrail must have a UI entry point.
 | Session management | SessionList + StatusBar |
 | Project/workspace | Sidebar + project selector |
 | Model config | SettingsPage |
-| Model switch | Composer selector (new session) + SessionView selector (mid-session) |
-| Trust level | Composer (low/medium/high selector) |
+| Run config (model subscription + verification) | ModelPicker popover — one trigger in Composer (new session) and in SessionView (mid-session); both switch live |
+| Completion verification | Composer/ModelPicker level select (`low`/`medium`/`high`, labelled 不校验/标准/严格) + VerificationPanel |
 | Abort/resume | Stop button + Resume button (completed = follow-up) |
+
+`trustLevel` is the storage/API name for **completion-verification strictness**,
+not model reasoning effort: `low` accepts the model's stop, `medium` runs the
+criteria or the project's `npm test`, `high` adds the deterministic evaluator.
+The raw word never reaches the user — the UI shows 不校验 / 标准 / 严格
+(`desktop/src/lib/verification.ts` is the single source of those labels).
+Mid-session switches are `POST /sessions/:id/trust`; the guardrail re-reads
+`config.completion` every turn boundary, so a running session picks the new
+level up on its next turn without a relaunch.
 
 The transcript is **one ordered timeline**, not parallel message/tool arrays.
 
@@ -335,8 +344,12 @@ To see the UI without launching the app, use the dev-only harness
 
 ```
 cd desktop && npm run dev
-# /preview.html?scene=<session|thinking|landing|empty|settings|replay|notify>&theme=<dark|light>
+# /preview.html?scene=<session|thinking|landing|empty|settings|replay|notify|picker>&theme=<dark|light>
+# add &hover=1 to reveal hover-only affordances (a screenshot cannot hover)
 ```
+
+`scene=picker` renders the run-config popover open (`defaultOpen`), which is the
+only way to see it without clicking.
 
 `scene=replay` folds `desktop/src/__replay.ts` — captured frames from a real
 session — through the real reducer, which is how ordering bugs are caught

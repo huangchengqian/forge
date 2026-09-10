@@ -195,19 +195,21 @@ body {
 }
 .sidebar-brand span { color: var(--accent); }
 
+/* Section labels are Chinese now: uppercase tracking is a Latin-only device
+   and reads as noise beside CJK, so weight and colour carry the hierarchy. */
 .side-section-label {
   padding: 12px 8px 5px;
-  font-size: 10.5px; font-weight: 700; color: var(--text-muted);
-  letter-spacing: 0.09em; text-transform: uppercase;
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  letter-spacing: 0.04em;
   flex-shrink: 0;
 }
-.side-header-row { display: flex; align-items: center; padding-right: 2px; }
+.side-header-row { display: flex; align-items: center; padding-right: 2px; margin-top: 4px; }
 .side-header-row .side-section-label { flex: 1; }
+.side-header-sessions { margin-top: 12px; }
 .side-add-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border: none; border-radius: 5px;
+  width: 22px; height: 22px; padding: 0; border: none; border-radius: 5px;
   background: transparent; color: var(--text-muted); cursor: pointer;
-  font-size: 13px; line-height: 1;
   transition: background 0.12s, color 0.12s;
 }
 .side-add-btn:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
@@ -215,6 +217,7 @@ body {
 /* Project switcher: a quiet menu-like control, not a form box. */
 .side-trigger {
   width: 100%; box-sizing: border-box;
+  margin-bottom: 10px;
   padding: 7px 9px; border: 1px solid transparent; border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
   color: var(--text); cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 550;
@@ -257,10 +260,29 @@ body {
 }
 .session-item.selected .kind-tag { color: var(--text-secondary); }
 
-/* Delete affordance appears on hover for the selected session only. */
-.session-del { display: none; width: 20px; height: 20px; }
+/* Delete affordance: hidden until the row is hovered, so the list reads as a
+   column of titles rather than a column of controls.
+   - absolute, so revealing it never re-truncates the title;
+   - takes the timestamp's place instead of stacking beside it;
+   - background must be set explicitly: an unstyled <button> paints the UA's
+     default grey block, which is what made this read as a chunky chip. */
+.session-del {
+  position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+  display: none; width: 19px; height: 19px; padding: 0;
+  align-items: center; justify-content: center;
+  background: transparent; border: none;
+  color: var(--text-muted); border-radius: 5px; cursor: pointer;
+}
 .session-item:hover .session-del { display: inline-flex; }
-.session-item:hover .session-del:hover { color: var(--red); background: transparent; }
+.session-item:hover .time { visibility: hidden; }
+.session-del:hover { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+
+.side-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+.side-empty { padding: 4px 8px; font-size: 12px; color: var(--text-muted); }
+
+/* Dev preview only: a headless screenshot cannot hover a row, so the preview
+   harness opts in with ?hover=1 to reveal the hover-only affordances. */
+body.preview-hover .session-del { display: inline-flex; }
 
 .side-bottom {
   display: flex; align-items: center; justify-content: space-between;
@@ -473,16 +495,99 @@ body {
 .composer-ta:disabled { opacity: 0.55; }
 
 .composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 5px; }
-.composer-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.model-picker {
+.composer-meta { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+
+/* --- run-config picker: model subscription + completion verification ---
+   One trigger, one panel. Both settings answer "how should this session
+   run", both apply from the next turn boundary, so they share a control
+   instead of competing for space in the composer row. */
+.picker { position: relative; display: inline-flex; min-width: 0; }
+
+.picker-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 100%; min-width: 0;
+  padding: 3px 7px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary);
   font-family: inherit; font-size: 12px; font-weight: 500;
-  color: var(--text-secondary); background: transparent;
-  border: none; outline: none; cursor: pointer;
-  padding: 2px 4px; border-radius: 4px; max-width: 240px;
-  transition: background 0.12s, color 0.12s;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.model-picker:hover { background: var(--bg); color: var(--text); }
-.meta-sep { color: var(--text-muted); opacity: 0.6; font-size: 11px; }
+.picker-trigger:hover,
+.picker-trigger[aria-expanded="true"] {
+  background: var(--bg); color: var(--text); border-color: var(--border);
+}
+.picker-trigger:disabled { opacity: 0.5; cursor: default; }
+
+.picker-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
+.picker-dot {
+  width: 3px; height: 3px; border-radius: 99px; flex-shrink: 0;
+  background: currentColor; opacity: 0.42;
+}
+.picker-trust { color: var(--text-muted); flex-shrink: 0; }
+.picker-caret { display: inline-flex; color: var(--text-muted); transition: transform 0.15s ease; }
+.picker-caret.is-open { transform: rotate(180deg); }
+
+.picker-panel {
+  position: absolute; z-index: 40;
+  min-width: 262px; max-width: min(340px, 86vw);
+  padding: 5px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.26), 0 3px 10px rgba(0, 0, 0, 0.16);
+}
+.picker-panel-above { bottom: calc(100% + 7px); left: 0; animation: picker-in-up 0.13s ease-out; }
+.picker-panel-below { top: calc(100% + 7px); left: 0; animation: picker-in-down 0.13s ease-out; }
+@keyframes picker-in-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes picker-in-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.picker-group { display: flex; flex-direction: column; gap: 1px; }
+.picker-group-label {
+  padding: 6px 9px 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.picker-rule { height: 1px; background: var(--border); margin: 5px 4px; }
+.picker-empty { padding: 5px 9px 7px; font-size: 12px; color: var(--text-muted); }
+
+.picker-option {
+  display: flex; align-items: flex-start; gap: 8px;
+  width: 100%; text-align: left;
+  padding: 7px 9px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary);
+  font-family: inherit; cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.picker-option:hover { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text); }
+.picker-option[data-active] { color: var(--text); }
+
+/* Fixed-width gutter so labels line up whether or not the check is drawn. */
+.picker-mark {
+  flex-shrink: 0; width: 12px; height: 17px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.picker-option-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.picker-option-label { font-size: 12.5px; font-weight: 550; line-height: 1.35; }
+.picker-option[data-active] .picker-option-label { font-weight: 650; }
+.picker-option-hint { font-size: 11px; line-height: 1.45; color: var(--text-muted); }
+
+/* Criteria entry, revealed only when verification is set to 严格. */
+.criteria-input {
+  flex: 1; min-width: 110px;
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--text);
+  font-family: var(--font-mono); font-size: 11.5px; outline: none;
+  transition: border-color 0.12s;
+}
+.criteria-input::placeholder { color: var(--text-muted); font-family: var(--font-ui); }
+.criteria-input:focus { border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong)); }
 .meta-item { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .meta-warn { color: var(--yellow); }
 .composer-hint {

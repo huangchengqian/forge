@@ -12,19 +12,49 @@ const statusColor: Record<SessionStatus, string> = {
 };
 
 const statusLabel: Record<SessionStatus, string> = {
-  running: "Running",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
+  running: "运行中",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
 };
 
-/** Compact relative time for the session list ("3m", "2h", "5d"). */
+/** Compact relative time for the session list ("now", "3m", "2h", "5d"). */
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
-  if (diff < 60_000) return "now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
-  return `${Math.floor(diff / 86_400_000)}d`;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}分`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}时`;
+  return `${Math.floor(diff / 86_400_000)}天`;
+}
+
+/** Hairline glyphs — drawn, not typed, so they sit on the optical centre
+ * instead of inheriting whatever weight the UI font gives "✕" and "+". */
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+      <path
+        d="M4 4l8 8M12 4l-8 8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+      <path
+        d="M8 3.5v9M3.5 8h9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
@@ -55,7 +85,7 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
   async function onAddProject() {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const picked = await open({ directory: true, multiple: false, title: "Choose a project folder" });
+      const picked = await open({ directory: true, multiple: false, title: "选择项目文件夹" });
       if (typeof picked !== "string" || !picked) return;
       const created = await addProject(picked);
       setActiveProject(created.id);
@@ -72,41 +102,42 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
       <div className="sidebar-drag" />
       <div className="sidebar-brand">Forge<span>.</span></div>
 
-      <div className="side-header-row" style={{ marginTop: 4 }}>
-        <div className="side-section-label">Project</div>
-        <button className="side-add-btn" onClick={() => void onAddProject()} title="Add project folder">
-          +
+      <div className="side-header-row">
+        <div className="side-section-label">项目</div>
+        <button
+          className="side-add-btn"
+          onClick={() => void onAddProject()}
+          title="添加项目文件夹"
+          aria-label="添加项目文件夹"
+        >
+          <PlusIcon />
         </button>
       </div>
       <select
         className="side-trigger"
         value={activeProject ?? ""}
         onChange={(e) => void onSwitchProject(e.target.value)}
-        style={{ marginBottom: 10 }}
       >
-        {projects.length === 0 && <option value="">No project</option>}
+        {projects.length === 0 && <option value="">未选择项目</option>}
         {projects.map((p) => (
           <option key={p.id} value={p.id}>{p.name}</option>
         ))}
       </select>
 
-      <div className="side-header-row">
-        <div className="side-section-label">Sessions</div>
+      <div className="side-header-row side-header-sessions">
+        <div className="side-section-label">会话</div>
         <button
           className="side-add-btn"
           onClick={onNewSession}
-          title="New session"
+          title="新建会话"
+          aria-label="新建会话"
         >
-          +
+          <PlusIcon />
         </button>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 8 }}>
-        {sessions.length === 0 && (
-          <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "4px 8px" }}>
-            No sessions yet
-          </div>
-        )}
+      <div className="side-list">
+        {sessions.length === 0 && <div className="side-empty">暂无会话</div>}
         {sessions.map((s) => (
           <div
             key={s.id}
@@ -118,8 +149,8 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
               style={{ background: statusColor[s.status] }}
               title={statusLabel[s.status]}
             />
-            <span className="title" title={s.goal}>{s.goal || "(untitled)"}</span>
-            <span className="kind-tag">{s.kind === "task" ? "TASK" : "CHAT"}</span>
+            <span className="title" title={s.goal}>{s.goal || "(未命名)"}</span>
+            <span className="kind-tag">{s.kind === "task" ? "任务" : "对话"}</span>
             <span className="time">{timeAgo(s.updatedAt)}</span>
             {s.id === activeId && (
               <button
@@ -128,10 +159,10 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
                   e.stopPropagation();
                   void remove(s.id);
                 }}
-                title="Delete session"
-                style={{ padding: "2px 5px", fontSize: 10, lineHeight: 1 }}
+                title="删除会话"
+                aria-label="删除会话"
               >
-                ✕
+                <CloseIcon />
               </button>
             )}
           </div>
@@ -140,33 +171,17 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
 
       <div className="side-bottom">
         <button className="side-bottom-btn" onClick={() => openSettings(true)}>
-          <span>⚙ Settings</span>
+          <span>设置</span>
         </button>
         <button
           className="side-bottom-btn side-icon-btn"
           onClick={toggleTheme}
-          title="Toggle theme"
+          title="切换主题"
+          aria-label="切换主题"
         >
           {theme === "dark" ? "☀" : "☾"}
         </button>
       </div>
     </div>
-  );
-}
-
-export { statusLabel };
-export function SidebarDeleteButton({ id }: { id: string }) {
-  const remove = store((s) => s.remove);
-  return (
-    <button
-      className="btn btn-danger btn-small"
-      style={{ padding: "1px 6px", fontSize: 10 }}
-      onClick={(e) => {
-        e.stopPropagation();
-        void remove(id);
-      }}
-    >
-      ✕
-    </button>
   );
 }

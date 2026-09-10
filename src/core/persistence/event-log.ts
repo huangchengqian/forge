@@ -27,6 +27,10 @@ export type PersistedEventType =
   | "AGENT_RUN_ENDED"
   // mid-session model switch (POST /sessions/:id/model)
   | "MODEL_CHANGED"
+  // mid-session completion-verification switch (POST /sessions/:id/trust).
+  // Same plane as MODEL_CHANGED: an operator action, not a loop signal — the
+  // UI reads it from the log over SSE, so it stays out of the control bus.
+  | "TRUST_CHANGED"
   | "TURN_STARTED"
   | "TURN_ENDED"
   | "MESSAGE_STARTED"

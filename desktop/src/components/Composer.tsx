@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { store } from "../lib/store.ts";
 import { fetchConfig } from "../lib/api.ts";
+import { ModelPicker } from "./ModelPicker.tsx";
 import type { ProviderConfig, TrustLevel } from "../types.ts";
 
 /** Parse the compact criteria syntax: "file_exists:hello.txt" or
@@ -62,8 +63,6 @@ export function Composer({ projectId }: { projectId?: string | null }) {
     setCriteriaLine("");
   };
 
-  const activeModel = providers.find((p) => p.id === providerId)?.modelId ?? "no subscription";
-
   return (
     <div className="landing-wrap">
       <div className="landing">
@@ -91,41 +90,21 @@ export function Composer({ projectId }: { projectId?: string | null }) {
           />
           <div className="composer-actions">
             <div className="composer-meta">
-              <select
-                className="model-picker"
-                value={providerId ?? ""}
-                onChange={(e) => setProviderId(e.target.value)}
-                title={`Model subscription: ${activeModel}`}
-              >
-                {providers.length === 0 && <option value="">no subscription</option>}
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.modelId}
-                  </option>
-                ))}
-              </select>
-              <span className="meta-sep" aria-hidden="true">·</span>
-              <select
-                className="model-picker"
-                value={trust}
-                onChange={(e) => setTrust(e.target.value as TrustLevel)}
-                title="low: no verification · medium: project checks · high: criteria + evaluator"
-              >
-                <option value="low">trust low</option>
-                <option value="medium">trust medium</option>
-                <option value="high">trust high</option>
-              </select>
+              <ModelPicker
+                providers={providers}
+                activeProviderId={providerId}
+                onSelectModel={setProviderId}
+                trustLevel={trust}
+                onSelectTrust={setTrust}
+                placement="above"
+              />
               {trust === "high" && (
-                <>
-                  <span className="meta-sep" aria-hidden="true">·</span>
-                  <input
-                    className="input"
-                    style={{ flex: 1, minWidth: 140, fontSize: 12, padding: "3px 8px" }}
-                    placeholder="criteria: file_exists:hello.txt"
-                    value={criteriaLine}
-                    onChange={(e) => setCriteriaLine(e.target.value)}
-                  />
-                </>
+                <input
+                  className="criteria-input"
+                  placeholder="验收标准，如 file_exists:hello.txt"
+                  value={criteriaLine}
+                  onChange={(e) => setCriteriaLine(e.target.value)}
+                />
               )}
             </div>
             <button className="btn btn-primary btn-small" onClick={submit} disabled={!goal.trim() || loading}>

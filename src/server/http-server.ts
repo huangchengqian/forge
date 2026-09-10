@@ -118,6 +118,25 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
         return;
       }
 
+      // Mid-session completion-verification switch. Running: the guardrail
+      // reads the new level at the next turn boundary; idle: persisted for the
+      // next resume.
+      if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "trust") {
+        const body = await readBody(req);
+        const level = body.trustLevel;
+        if (level !== "low" && level !== "medium" && level !== "high") {
+          json(res, 400, { error: 'trustLevel must be "low", "medium" or "high"' });
+          return;
+        }
+        try {
+          const result = await manager.switchTrust(parts[1]!, level);
+          json(res, 200, result);
+        } catch (err) {
+          json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
       if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "abort") {
         const result = await manager.abort(parts[1]!);
         json(res, result.ok ? 202 : 409, result);

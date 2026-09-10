@@ -6,7 +6,7 @@
  * plain browser without the Tauri sidecar.
  * Open /preview.html?scene=<name>&theme=<dark|light>
  *
- * Scenes: session | thinking | landing | empty | settings | replay | notify
+ * Scenes: session | thinking | landing | empty | settings | replay | notify | picker
  *
  * `replay` folds captured real session frames through the real reducer;
  * `notify` additionally patches document.hidden and window.Notification and
@@ -20,6 +20,7 @@ import { initClient } from "./lib/api.ts";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { SessionView } from "./components/SessionView.tsx";
 import { Composer } from "./components/Composer.tsx";
+import { ModelPicker } from "./components/ModelPicker.tsx";
 import { SettingsPage } from "./components/SettingsPage.tsx";
 import { REPLAY } from "./__replay.ts";
 import type { EventEnvelope, TimelineEntry } from "./types.ts";
@@ -34,6 +35,10 @@ document.documentElement.dataset.theme = theme;
 // (Settings, Composer's subscription list) render against real data.
 const token = params.get("token");
 if (token) initClient({ baseUrl: params.get("base") ?? "http://127.0.0.1:5300", token });
+
+// Dev-only: reveal hover-only affordances so a headless screenshot can show
+// them (a screenshot cannot hover a row).
+if (params.get("hover") === "1") document.body.classList.add("preview-hover");
 
 const now = Date.now();
 const MIN = 60_000;
@@ -217,7 +222,7 @@ store.setState({
   theme,
   conversation:
     scene === "session"
-      ? { timeline, verification, costSpent: 0.42, costBudget: 2, modelId: null }
+      ? { timeline, verification, costSpent: 0.42, costBudget: 2, modelId: null, trustLevel: null }
       : scene === "replay"
         ? replayConversation()
         : scene === "thinking"
@@ -230,8 +235,9 @@ store.setState({
               costSpent: 0.03,
               costBudget: 2,
               modelId: null,
+              trustLevel: null,
             }
-          : { timeline: [], verification: [], costSpent: 0, costBudget: null, modelId: null },
+          : { timeline: [], verification: [], costSpent: 0, costBudget: null, modelId: null, trustLevel: null },
 });
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -320,6 +326,13 @@ function NotifyProbe() {
 const active = sessions[0]!;
 const replay = scene === "replay";
 
+/** scene=picker — the run-config popover, open, against sample subscriptions. */
+const PREVIEW_PROVIDERS = [
+  { id: "minimax-cn-anthropic", api: "anthropic-messages" as const, modelId: "MiniMax-M2.7", baseUrl: "https://api.minimaxi.com/anthropic", apiKey: "" },
+  { id: "minimax-openai", api: "openai-completions" as const, modelId: "MiniMax-M3", baseUrl: "https://api.minimaxi.com/v1", apiKey: "" },
+  { id: "anthropic", api: "anthropic-messages" as const, modelId: "claude-sonnet-4-6", baseUrl: "https://api.anthropic.com", apiKey: "" },
+];
+
 createRoot(document.getElementById("root")!).render(
   <>
     <Shell>
@@ -337,5 +350,26 @@ createRoot(document.getElementById("root")!).render(
       )}
     </Shell>
     {scene === "notify" && <NotifyProbe />}
+    {scene === "picker" && (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          display: "grid",
+          placeItems: "center",
+          zIndex: 90,
+        }}
+      >
+        <ModelPicker
+          providers={PREVIEW_PROVIDERS}
+          activeProviderId="minimax-cn-anthropic"
+          onSelectModel={() => {}}
+          trustLevel="medium"
+          onSelectTrust={() => {}}
+          placement="below"
+          defaultOpen
+        />
+      </div>
+    )}
   </>,
 );

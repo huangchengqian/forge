@@ -84,6 +84,15 @@ export async function switchModel(id: string, providerId: string): Promise<{ mod
   return send(`/sessions/${id}/model`, "POST", { providerId });
 }
 
+/** Completion-verification level. Running sessions pick it up at the next
+ * turn boundary; idle ones persist it for the next resume. */
+export async function switchTrust(
+  id: string,
+  trustLevel: "low" | "medium" | "high",
+): Promise<{ trustLevel: string }> {
+  return send(`/sessions/${id}/trust`, "POST", { trustLevel });
+}
+
 export async function deleteSession(id: string): Promise<void> {
   await send(`/sessions/${id}`, "DELETE");
 }

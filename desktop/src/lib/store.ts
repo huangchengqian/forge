@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { getCfg } from "./api.ts";
 import { notifyTaskOutcome, outcomeFromTerminal } from "./notify.ts";
+import { trustLabel } from "./verification.ts";
 import type {
   ApprovalRecordView,
   ConversationView,
@@ -27,8 +28,10 @@ export interface DesktopState {
   createSession: (input: {
     goal: string;
     projectId?: string;
+    providerId?: string;
     trustLevel: TrustLevel;
     criteria?: Array<{ kind: string; [k: string]: unknown }>;
+    maxTurns?: number;
   }) => Promise<void>;
   steer: (message: string) => Promise<void>;
   abort: () => Promise<void>;
@@ -49,6 +52,7 @@ const emptyConversation = (): ConversationView => ({
   costSpent: 0,
   costBudget: null,
   modelId: null,
+  trustLevel: null,
 });
 
 let source: EventSource | null = null;
@@ -310,6 +314,19 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
         tone: "info",
         icon: "⇄",
         text: `Model switched to ${String(payload.modelId ?? "unknown")} — applies from the next turn.`,
+      });
+      return { conversation };
+    }
+
+    case "TRUST_CHANGED": {
+      const level = String(payload.trustLevel ?? "");
+      conversation.trustLevel = level as ConversationView["trustLevel"];
+      conversation.timeline = upsert(conversation.timeline, {
+        kind: "notice",
+        id: `trust-${stamp}`,
+        tone: "info",
+        icon: "✓",
+        text: `完成验证改为「${trustLabel(level)}」—— 从下一轮开始生效。`,
       });
       return { conversation };
     }

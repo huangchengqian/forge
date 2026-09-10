@@ -14,7 +14,7 @@ import { ProjectsRegistry } from "./projects.ts";
 import { buildModel, makeStreamFnWithKey, providerEnv } from "./model-resolver.ts";
 import { loadForgeConfig, resolveProvider } from "./config-store.ts";
 import type { ProviderConfig } from "./config-store.ts";
-import type { Session, SessionStatus, TrustLevel } from "../types.ts";
+import type { Session, SessionStatus, TrustLevel, CompletionConfig } from "../types.ts";
 import type { SuccessCriterion } from "../core/types/criterion.ts";
 
 type ActiveEntry = {
@@ -49,6 +49,13 @@ export class SessionManager {
    * Consumed at most once per switch.
    */
   private pendingModels = new Map<string, Model<any>>();
+  /**
+   * Live completion config per running session — the *same object* handed to
+   * the guardrails in `launchAgent`. `makeShouldStopAfterTurn` re-reads
+   * `config.completion` at every turn boundary, so mutating `trustLevel` here
+   * takes effect on the next turn without a new hook or a relaunch.
+   */
+  private completions = new Map<string, CompletionConfig>();
 
   constructor(
     private readonly opts: {
@@ -301,6 +308,35 @@ export class SessionManager {
   }
 
   /**
+   * Mid-session completion-verification switch. `trustLevel` decides how hard
+   * "the model says it is done" is checked: low accepts the stop (chat /
+   * questions), medium runs the criteria or, failing those, the project's
+   * `npm test`, high adds the deterministic evaluator on top.
+   *
+   * A running session picks this up at the next turn boundary: the guardrail
+   * destructures `config.completion` on every turn, so mutating the live
+   * object is enough — no queue, no relaunch. An idle session just persists it
+   * for the next resume.
+   */
+  async switchTrust(
+    sessionId: string,
+    trustLevel: TrustLevel,
+  ): Promise<{ trustLevel: TrustLevel }> {
+    const session = await loadSession(sessionId);
+    if (!session) throw new Error(`session ${sessionId} not found`);
+
+    session.trustLevel = trustLevel;
+    session.updatedAt = Date.now();
+    await saveSession(session);
+
+    const live = this.completions.get(sessionId);
+    if (live) live.trustLevel = trustLevel;
+
+    await appendEvent(sessionId, "TRUST_CHANGED", { trustLevel }).catch(() => {});
+    return { trustLevel };
+  }
+
+  /**
    * Launch the agent loop on a (possibly recovered) session. Shared by
    * `create()` and `resume()`. The caller owns the CostGuard's lifetime and
    * is responsible for adding the returned entry to `this.active`.
@@ -314,12 +350,7 @@ export class SessionManager {
     session: Session,
     subscription: ProviderConfig,
     costGuard: import("../guardrails/cost-guard.ts").CostGuard,
-    completion: {
-      trustLevel: TrustLevel;
-      criteria: SuccessCriterion[];
-      maxCost: number | null;
-      maxTurns: number | null;
-    },
+    completion: CompletionConfig,
     promptOverride?: string | undefined,
   ): Promise<{
     controller: AbortController;
@@ -329,6 +360,8 @@ export class SessionManager {
     const steeringQueue: AgentMessage[] = [];
     const controller = new AbortController();
     const sessionId = session.id;
+    // Keep the live object reachable so switchTrust() can mutate it mid-run.
+    this.completions.set(sessionId, completion);
 
     const runPromise = runAgent({
       session,
@@ -364,6 +397,7 @@ export class SessionManager {
           reason: session.failureReason,
         }).catch(() => {});
         this.active.delete(sessionId);
+        this.completions.delete(sessionId);
         throw err;
       });
 
@@ -425,6 +459,9 @@ export class SessionManager {
       this.active.delete(sessionId);
       this.idle.set(sessionId, entry);
     }
+    // The loop is gone; drop the live reference so switchTrust() cannot mutate
+    // a config nobody reads. A resume re-registers a fresh one.
+    this.completions.delete(sessionId);
     const status: SessionStatus = final.failureReason ? "failed" : "completed";
     final.status = status;
     final.cost = { ...final.cost, total: costGuard.getSpent() };

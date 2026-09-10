@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { store } from "../lib/store.ts";
 import { fetchConfig } from "../lib/api.ts";
 import { Markdown } from "./Markdown.tsx";
-import type { ProviderConfig, TimelineEntry } from "../types.ts";
+import { ModelPicker } from "./ModelPicker.tsx";
+import type { ProviderConfig, TimelineEntry, TrustLevel } from "../types.ts";
 
 /** One-line argument summary for a tool row (the full JSON lives behind expand). */
 function summarizeArgs(args: unknown): string {
@@ -113,7 +114,7 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
   status: string;
   failureReason: string | null;
   modelId: string;
-  trustLevel: string;
+  trustLevel: TrustLevel;
 }) {
   const conversation = store((s) => s.conversation);
   const connected = store((s) => s.connected);
@@ -132,6 +133,11 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
   const canFollowUp = status === "completed";
   // MODEL_CHANGED events override the session's original model in the UI.
   const effectiveModelId = conversation.modelId ?? modelId;
+  // TRUST_CHANGED events do the same for the verification level.
+  const effectiveTrust: TrustLevel = conversation.trustLevel ?? trustLevel;
+  // Provider id behind the effective model (the picker is keyed by provider).
+  const activeProviderId =
+    providers.find((p) => p.modelId === effectiveModelId)?.id ?? null;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -174,6 +180,18 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
       await switchModel(sessionId, providerId);
     } catch (err) {
       console.error("model switch failed:", err);
+    }
+  };
+
+  // Completion-verification switch. A running session picks it up at the next
+  // turn boundary; the server echoes TRUST_CHANGED so the UI updates live.
+  const onTrustSwitch = async (level: TrustLevel) => {
+    if (level === effectiveTrust) return;
+    try {
+      const { switchTrust } = await import("../lib/api.ts");
+      await switchTrust(sessionId, level);
+    } catch (err) {
+      console.error("verification switch failed:", err);
     }
   };
 
@@ -362,33 +380,19 @@ export function SessionView({ sessionId, goal, status, failureReason, modelId, t
             />
             <div className="composer-actions">
               <div className="composer-meta">
-                <select
-                  className="model-picker"
-                  value={
-                    providers.some((p) => p.modelId === effectiveModelId)
-                      ? providers.find((p) => p.modelId === effectiveModelId)!.id
-                      : ""
-                  }
-                  onChange={(e) => void onModelSwitch(e.target.value)}
-                  title="Model subscription — switching takes effect at the next turn boundary"
-                >
-                  {!providers.some((p) => p.modelId === effectiveModelId) && (
-                    <option value="">{effectiveModelId || "no model"}</option>
-                  )}
-                  {providers.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.modelId}
-                    </option>
-                  ))}
-                </select>
-                <span className="meta-sep" aria-hidden="true">·</span>
-                <span className="meta-item" title="Completion verification level for this session">
-                  trust {trustLevel}
-                </span>
+                <ModelPicker
+                  providers={providers}
+                  activeProviderId={activeProviderId}
+                  activeModelLabel={effectiveModelId || undefined}
+                  onSelectModel={(id) => void onModelSwitch(id)}
+                  trustLevel={effectiveTrust}
+                  onSelectTrust={(level) => void onTrustSwitch(level)}
+                  placement="above"
+                />
                 {!connected && (
                   <span className="meta-item meta-warn" title="Live event stream is reconnecting…">
                     <span className="status-dot" data-tone="warn" />
-                    reconnecting
+                    连接中断，正在重连
                   </span>
                 )}
               </div>

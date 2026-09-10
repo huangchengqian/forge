@@ -123,4 +123,6 @@ export interface ConversationView {
   costBudget: number | null;
   /** Updated by MODEL_CHANGED events (mid-session model switch). */
   modelId: string | null;
+  /** Updated by TRUST_CHANGED events (mid-session verification switch). */
+  trustLevel: TrustLevel | null;
 }
