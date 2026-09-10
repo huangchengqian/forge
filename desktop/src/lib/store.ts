@@ -498,11 +498,19 @@ export const store = create<DesktopState>((set, get) => ({
     }
   },
 
+  // Both steer and resume surface the failure in store.error and rethrow, so
+  // the composer can keep the user's text instead of clearing it into the void.
   steer: async (message) => {
     const id = get().activeSessionId;
     if (!id || !message.trim()) return;
     const { steerSession } = await import("./api.ts");
-    await steerSession(id, message.trim());
+    set({ error: null });
+    try {
+      await steerSession(id, message.trim());
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+      throw err;
+    }
   },
 
   abort: async () => {
@@ -524,6 +532,7 @@ export const store = create<DesktopState>((set, get) => ({
       await get().refreshSessions();
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) });
+      throw err;
     }
   },
 

@@ -127,6 +127,7 @@ export function SessionView({
 }) {
   const conversation = store((s) => s.conversation);
   const connected = store((s) => s.connected);
+  const error = store((s) => s.error);
   const steer = store((s) => s.steer);
   const abort = store((s) => s.abort);
   const resume = store((s) => s.resume);
@@ -230,14 +231,19 @@ export function SessionView({
   // failed/cancelled retries (message optional — empty retries the goal).
   const send = async () => {
     const text = steerInput.trim();
-    if (running || canFollowUp) {
-      if (!text) return;
-      await (running ? steer(text) : resume(text));
+    try {
+      if (running || canFollowUp) {
+        if (!text) return;
+        await (running ? steer(text) : resume(text));
+        setSteerInput("");
+        return;
+      }
+      await resume(text || undefined);
       setSteerInput("");
-      return;
+    } catch {
+      // store.error carries the message and the composer renders it; keep the
+      // text in the box so a failed send is never a silent no-op.
     }
-    await resume(text || undefined);
-    setSteerInput("");
   };
   const canSend = running || canFollowUp ? !!steerInput.trim() : true;
   const placeholder = running
@@ -313,8 +319,12 @@ export function SessionView({
               <button
                 className="btn btn-primary btn-small"
                 onClick={async () => {
-                  await resume(resumeMessage.trim() || undefined);
-                  setResumeOpen(false);
+                  try {
+                    await resume(resumeMessage.trim() || undefined);
+                    setResumeOpen(false);
+                  } catch {
+                    // store.error renders in the composer; keep the modal open.
+                  }
                 }}
               >
                 Resume
@@ -426,6 +436,11 @@ export function SessionView({
                   <span className="meta-item meta-warn" title="Live event stream is reconnecting…">
                     <span className="status-dot" data-tone="warn" />
                     连接中断，正在重连
+                  </span>
+                )}
+                {error && (
+                  <span className="meta-item meta-error" title={error}>
+                    发送失败：{error}
                   </span>
                 )}
               </div>
