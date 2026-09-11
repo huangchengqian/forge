@@ -14,10 +14,9 @@
  */
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeBeforeToolCall } from "./before-tool-call.ts";
-import { readJournal } from "../guard/journal.ts";
 import { CostGuard } from "./cost-guard.ts";
 import type { GuardrailConfig } from "./types.ts";
 import type { Session } from "../types.ts";
@@ -70,6 +69,12 @@ after(() => {
   delete process.env.FORGE_GUARD_POLICY;
 });
 
+/** Parse the journal JSONL written by the hook (journal.ts no longer exports a reader). */
+function readJournalLines(undoRoot: string): Array<{ path: string; backup: string | null; action: string }> {
+  const raw = readFileSync(join(undoRoot, "journal.jsonl"), "utf8");
+  return raw.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
 describe("beforeToolCall → undo journal wiring", () => {
   test("a write tool call journals the target under config.undoRoot", async () => {
     const undoRoot = join(TMP, "undo-write");
@@ -83,7 +88,7 @@ describe("beforeToolCall → undo journal wiring", () => {
     } as never);
 
     assert.equal(result, undefined, "write is allowed by default policy");
-    const entries = await readJournal(undoRoot);
+    const entries = readJournalLines(undoRoot);
     assert.equal(entries.length, 1);
     assert.equal(entries[0]!.action, "modified");
     assert.equal(entries[0]!.path, target);
@@ -99,10 +104,38 @@ describe("beforeToolCall → undo journal wiring", () => {
     } as never);
 
     assert.equal(result, undefined);
-    const entries = await readJournal(undoRoot);
+    const entries = readJournalLines(undoRoot);
     assert.equal(entries.length, 1);
     assert.equal(entries[0]!.action, "created");
     assert.equal(entries[0]!.backup, null);
+  });
+});
+
+describe("beforeToolCall → abort wiring", () => {
+  test("Stop wins over a pending approval wait (the 卡死 bug)", async () => {
+    // bash is "ask" by default. The approval relay never answers — the old
+    // implementation blocked here for the full 5-minute timeout and ignored
+    // the abort signal, so a Stop press did nothing while the model's retry
+    // re-armed the wait forever.
+    const never: GuardrailConfig = {
+      ...config(join(TMP, "undo-abort")),
+      approval: { request: () => new Promise<boolean>(() => {}) },
+    };
+    const hook = makeBeforeToolCall(never);
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 50);
+
+    const result = await Promise.race([
+      hook(
+        { toolCall: { name: "bash", id: "call-5" }, args: { command: "ls -la /tmp/x" } } as never,
+        controller.signal,
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("hook still blocked 500ms after abort")), 500),
+      ),
+    ]);
+    assert.ok(result && result.block === true, "aborted call is blocked");
+    assert.equal(result.terminate, true, "aborted call terminates the session");
   });
 });
 

@@ -51,7 +51,6 @@ check "guard policy tests"    "cd $ROOT && node --import tsx --test src/guard/po
 check "guard wiring tests"    "cd $ROOT && node --import tsx --test src/guardrails/before-tool-call.test.ts"
 check "stop gate tests"       "cd $ROOT && node --import tsx --test src/guardrails/should-stop-after-turn.test.ts"
 check "approval-hub tests"    "cd $ROOT && node --import tsx --test src/server/approval-hub.test.ts"
-check "undo tests"            "cd $ROOT && node --import tsx --test src/server/undo.test.ts"
 check "config-store tests"   "cd $ROOT && node --import tsx --test src/server/config-store.test.ts"
 check "model discovery tests" "cd $ROOT && node --import tsx --test src/server/model-discovery.test.ts"
 check "stuck-detector tests" "cd $ROOT && node --import tsx --test src/guardrails/stuck-detector.test.ts"

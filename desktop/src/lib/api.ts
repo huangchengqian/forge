@@ -131,18 +131,6 @@ export async function resolveApproval(
   await send(`/sessions/${sessionId}/approvals/${requestId}/${decision}`, "POST");
 }
 
-// --- diff / undo ---
-
-export async function fetchDiff(
-  sessionId: string,
-): Promise<{ kind: string; diff?: string; files?: Array<{ path: string; backup: boolean }> }> {
-  return getJson(`/sessions/${sessionId}/diff`);
-}
-
-export async function undoSession(sessionId: string): Promise<void> {
-  await send(`/sessions/${sessionId}/undo`, "POST");
-}
-
 // --- config (model subscriptions) ---
 
 export async function fetchConfig(): Promise<ForgeConfigData> {

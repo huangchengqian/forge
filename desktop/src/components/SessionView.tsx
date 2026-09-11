@@ -131,9 +131,6 @@ export function SessionView({
   const steer = store((s) => s.steer);
   const abort = store((s) => s.abort);
   const resume = store((s) => s.resume);
-  const showDiff = store((s) => s.showDiff);
-  const undo = store((s) => s.undo);
-  const diffText = store((s) => s.diffText);
   const [steerInput, setSteerInput] = useState("");
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resumeMessage, setResumeMessage] = useState("");
@@ -258,17 +255,8 @@ export function SessionView({
       <header className="session-head">
         <div className="session-head-inner">
           <h1 className="session-goal" title={goal}>{goal}</h1>
-          <span className="status-chip" data-status={status}>
-            <span className="status-dot" />
-            {status}
-          </span>
           <CostGauge spent={conversation.costSpent} budget={conversation.costBudget} />
           <div className="head-actions">
-            {running && (
-              <button className="btn btn-stop btn-small" onClick={() => void abort()}>
-                Stop
-              </button>
-            )}
             {resumable && (
               <button
                 className="btn btn-primary btn-small"
@@ -281,12 +269,6 @@ export function SessionView({
                 Resume
               </button>
             )}
-            <button className="btn btn-quiet btn-small" onClick={() => void showDiff()} title="Show changes made in this workspace">
-              Diff
-            </button>
-            <button className="btn btn-quiet btn-small" onClick={() => void undo()} title="Roll back the agent's last file changes">
-              Undo
-            </button>
           </div>
         </div>
       </header>
@@ -343,6 +325,7 @@ export function SessionView({
               return (
                 <article key={entry.id} className="entry entry-user">
                   <div className="bubble-user">{entry.text}</div>
+                  {entry.pending && <span className="bubble-pending">已入队 · 下一轮送达</span>}
                 </article>
               );
             }
@@ -383,22 +366,6 @@ export function SessionView({
           <div ref={endRef} />
         </div>
       </div>
-
-      {diffText !== null && (
-        <section className="diff-panel">
-          <div className="diff-panel-head">
-            <span>Changes in this workspace</span>
-            <button
-              className="icon-btn"
-              title="Hide"
-              onClick={() => store.setState({ diffText: null })}
-            >
-              ✕
-            </button>
-          </div>
-          <pre className="diff-panel-body">{diffText}</pre>
-        </section>
-      )}
 
       <footer className="composer-wrap">
         <div className="conversation-composer">
@@ -444,19 +411,31 @@ export function SessionView({
                   </span>
                 )}
               </div>
-              <button
-                className="btn btn-primary btn-small"
-                onClick={() => void send()}
-                disabled={!canSend}
-                title="Enter to send · Shift+Enter for a new line"
-              >
-                {sendLabel}
-                <span className="key-hint">↵</span>
-              </button>
+              {running ? (
+                <button
+                  className="btn btn-stop btn-small"
+                  onClick={() => void abort()}
+                  title="Stop the session"
+                >
+                  <span className="stop-square" aria-hidden="true" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary btn-small"
+                  onClick={() => void send()}
+                  disabled={!canSend}
+                  title="Enter to send · Shift+Enter for a new line"
+                >
+                  {sendLabel}
+                  <span className="key-hint">↵</span>
+                </button>
+              )}
             </div>
           </div>
           <div className="composer-hint">
             <span><b>Enter</b> to send · <b>Shift+Enter</b> for a new line</span>
+            {running && <span>Enter 发送引导 · <b>Stop</b> 按钮终止会话</span>}
             {!running && !canFollowUp && resumable && <span>Sending an empty message retries the goal</span>}
           </div>
         </div>

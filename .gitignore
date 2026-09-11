@@ -51,3 +51,9 @@ tsconfig.tsbuildinfo
 /.workbuddy/
 /.opencode/
 /.playwright-mcp/
+
+# desktop vite build output
+/desktop/dist/
+# pi session-backends are not npm workspaces of this repo (not symlinked
+# into node_modules) — their build output is irrelevant to the runtime
+pi/packages/session-backends/*/dist/

@@ -8,13 +8,16 @@ import type { CostGuard } from "./cost-guard.ts";
  * dependency.
  */
 export interface ApprovalRelay {
-  /** Resolves when the user approves (true) or denies/expires (false). */
-  request(input: {
-    requestId: string;
-    toolName: string;
-    input: Record<string, unknown>;
-    timeoutMs?: number;
-  }): Promise<boolean>;
+  /** Resolves when the user approves (true) or denies/expires/aborts (false). */
+  request(
+    input: {
+      requestId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      timeoutMs?: number;
+    },
+    signal?: AbortSignal,
+  ): Promise<boolean>;
 }
 
 export interface GuardrailConfig {

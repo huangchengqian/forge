@@ -24,7 +24,6 @@ export interface DesktopState {
   error: string | null;
   theme: "dark" | "light";
   settingsOpen: boolean;
-  diffText: string | null;
   /**
    * Registered projects + the active one. Lifted out of Sidebar-local state so
    * a new session is created against the project the user actually picked
@@ -52,8 +51,6 @@ export interface DesktopState {
   remove: (id: string) => Promise<void>;
   approve: (requestId: string) => Promise<void>;
   deny: (requestId: string) => Promise<void>;
-  undo: () => Promise<void>;
-  showDiff: () => Promise<void>;
   toggleTheme: () => void;
   setSettingsOpen: (open: boolean) => void;
   resetConversation: () => void;
@@ -147,6 +144,11 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
     case "MESSAGE_STARTED": {
       const { role, text, stamp: key } = readMessage(payload.message);
       if (role === "user") {
+        // A steered message being consumed: drop the pending echo so the
+        // real message (with its own stable id) takes over — no double bubble.
+        conversation.timeline = conversation.timeline.filter(
+          (e) => !(e.kind === "user" && e.pending && e.text === text),
+        );
         // The prompt is already complete here; MESSAGE_ENDED only re-states it.
         conversation.timeline = upsert(conversation.timeline, {
           kind: "user",
@@ -374,8 +376,21 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
       // kind=guard_approval_request → pull the pending dialog.
       if (payload.kind === "guard_approval_request") {
         void pollApprovals();
+        return {};
       }
-      return {};
+      // A user steering message: echo it into the timeline immediately.
+      // Before this, a steered message existed only in a server-side queue —
+      // while the loop was busy (e.g. a long tool call) the text simply
+      // vanished from the user's view, reading as "lost".
+      const text = String(payload.message ?? "");
+      if (!text) return {};
+      conversation.timeline = upsert(conversation.timeline, {
+        kind: "user",
+        id: `steer-${stamp}`,
+        text,
+        pending: true,
+      });
+      return { conversation };
     }
 
     // The server emits exactly these two terminal types (session-manager.ts):
@@ -433,7 +448,6 @@ export const store = create<DesktopState>((set, get) => ({
   error: null,
   theme: (localStorage.getItem("forge-theme") as "dark" | "light") || "dark",
   settingsOpen: false,
-  diffText: null,
   projects: [],
   activeProjectId: null,
 
@@ -486,7 +500,6 @@ export const store = create<DesktopState>((set, get) => ({
       activeSessionId: id,
       conversation: emptyConversation(),
       pendingApproval: null,
-      diffText: null,
       error: null,
     });
     if (!id) return;
@@ -596,28 +609,6 @@ export const store = create<DesktopState>((set, get) => ({
     await resolveApproval(id, requestId, "deny");
     set({ pendingApproval: null });
     void pollApprovals();
-  },
-
-  undo: async () => {
-    const id = get().activeSessionId;
-    if (!id) return;
-    const { undoSession } = await import("./api.ts");
-    await undoSession(id);
-    set({ diffText: null });
-  },
-
-  showDiff: async () => {
-    const id = get().activeSessionId;
-    if (!id) return;
-    const { fetchDiff } = await import("./api.ts");
-    const diff = await fetchDiff(id);
-    if (diff.kind === "git" && diff.diff) {
-      set({ diffText: diff.diff });
-    } else if (diff.files) {
-      set({ diffText: diff.files.map((f) => `${f.backup ? "M" : "+"} ${f.path}`).join("\n") });
-    } else {
-      set({ diffText: "(no changes)" });
-    }
   },
 
   toggleTheme: () => {

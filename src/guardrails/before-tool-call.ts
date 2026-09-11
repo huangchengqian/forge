@@ -9,6 +9,33 @@ import type { GuardrailConfig } from "./types.ts";
 
 const APPROVAL_TIMEOUT_MS = 5 * 60_000;
 
+/** Resolved (instead of the awaited promise) when the abort signal fires. */
+const ABORTED: unique symbol = Symbol("aborted");
+
+/**
+ * Race a promise against the abort signal, resolving with ABORTED on stop.
+ * The hook owns Stop-responsiveness — it must not trust the approval relay
+ * to observe the signal itself.
+ */
+function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T | typeof ABORTED> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.resolve(ABORTED);
+  return new Promise<T | typeof ABORTED>((resolve) => {
+    const onAbort = () => resolve(ABORTED);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(ABORTED);
+      },
+    );
+  });
+}
+
 /**
  * Guard pipeline for every tool call, injected as Pi's beforeToolCall hook:
  * 1. capability policy (allow / ask / deny — same rules as the agent's bash)
@@ -21,6 +48,14 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
     ctx: BeforeToolCallContext,
     signal?: AbortSignal,
   ): Promise<BeforeToolCallResult | undefined> => {
+    // Abort first: a Stop press must win over everything below, including a
+    // pending approval wait (the "bash 卡死 + Stop 无效" bug — the hook used
+    // to block for the full 5-minute approval timeout with no observer on
+    // the signal, and the model's retry re-armed it forever).
+    if (signal?.aborted) {
+      return { block: true, reason: "aborted by user", terminate: true };
+    }
+
     const toolName = ctx.toolCall.name;
     const input = (ctx.args ?? (ctx.toolCall as { arguments?: unknown }).arguments ?? {}) as Record<
       string,
@@ -62,14 +97,17 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
         requestId,
         toolName,
       }).catch(() => {});
-      const approved = await config.approval.request({
-        requestId,
-        toolName,
-        input,
-        timeoutMs: APPROVAL_TIMEOUT_MS,
-      });
-      if (signal?.aborted) {
-        return { block: true, reason: "aborted", terminate: true };
+      const approved = await raceWithAbort(
+        config.approval.request({
+          requestId,
+          toolName,
+          input,
+          timeoutMs: APPROVAL_TIMEOUT_MS,
+        }),
+        signal,
+      );
+      if (approved === ABORTED || signal?.aborted) {
+        return { block: true, reason: "aborted by user", terminate: true };
       }
       if (!approved) {
         return { block: true, reason: "rejected by user" };

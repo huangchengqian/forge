@@ -12,7 +12,6 @@ import {
 } from "../core/persistence/session-store.ts";
 import { ApprovalHub } from "./approval-hub.ts";
 import { ProjectsRegistry } from "./projects.ts";
-import { captureGitHead } from "./undo.ts";
 import { buildModel, makeStreamFnWithKey, providerEnv } from "./model-resolver.ts";
 import { loadForgeConfig, resolveProvider } from "./config-store.ts";
 import type { ProviderConfig } from "./config-store.ts";
@@ -146,12 +145,7 @@ export class SessionManager {
     await saveSession(session);
     await appendEvent(sessionId, "SESSION_CREATED", { goal: session.goal, workspace });
 
-    // 4. Undo baseline: record the workspace HEAD before the agent runs so the
-    //    Diff/Undo surface can show `git diff <head>` (best-effort; no-op in a
-    //    non-git workspace, which falls back to the journal).
-    await captureGitHead(this.opts.forgeHome, sessionId, workspace).catch(() => {});
-
-    // 5. Guardrails + launch (launchAgent registers the runtime).
+    // 4. Guardrails + launch (launchAgent registers the runtime).
     const costGuard = new (await import("../guardrails/cost-guard.ts")).CostGuard(
       input.maxCost ?? null,
     );
@@ -266,12 +260,6 @@ export class SessionManager {
     //   - completed → follow-up: prompt = the message itself (the goal is
     //     already in the replayed history; re-sending it would re-run the
     //     finished task).
-    // Keep the baseline captured at session creation (overwrite: false) so
-    // undo still diffs against the original pre-task state after a resume.
-    await captureGitHead(this.opts.forgeHome, sessionId, session.workspace, {
-      overwrite: false,
-    }).catch(() => {});
-
     const wasCompleted = priorStatus === "completed";
     const launchOpts = {
       trustLevel: session.trustLevel,

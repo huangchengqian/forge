@@ -1,16 +1,22 @@
 /**
- * Forge Guard — undo journal (9.6.6, git-independent rollback).
+ * Forge Guard — write journal (pre-change backups).
  *
  * Before an allowed `write`/`edit` tool executes, the guard copies the target
- * file's original content into `$FORGE_UNDO_DIR/files/` and appends a JSONL
- * entry to `$FORGE_UNDO_DIR/journal.jsonl`. The Forge server reads this
- * journal to render diffs and to restore the pre-task state (POST undo).
+ * file's original content into `<undoRoot>/files/` and appends a JSONL entry
+ * to `<undoRoot>/journal.jsonl`. This is the safety premise behind the
+ * "file writes are auto-allowed" policy rule: every tool-funneled mutation
+ * leaves a byte-exact before-image on disk.
+ *
+ * This is INTERNAL INSURANCE, not a user-facing undo feature (the Diff/Undo
+ * product surface was removed 2026-09-11 — a partial undo that reads as
+ * complete is worse than none). Recovery story for users: git. The backups
+ * under `<forgeHome>/undo/<sessionId>/` remain manually recoverable.
  *
  * Journaling is best-effort: a failure to journal never blocks the tool.
  */
 
-import { copyFile, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export type UndoEntry = {
@@ -45,15 +51,14 @@ export async function journalFile(
   cwd: string,
   relPath: string,
 ): Promise<UndoEntry | null> {
-  const dir = undoRoot;
-  if (!dir) return null;
+  if (!undoRoot) return null;
   const absolute = resolve(cwd, relPath);
   try {
-    await mkdir(join(dir, "files"), { recursive: true });
+    await mkdir(join(undoRoot, "files"), { recursive: true });
     const hadOriginal = await exists(absolute);
     let backup: string | null = null;
     if (hadOriginal) {
-      backup = join(dir, "files", `${Date.now()}-${randomUUID().slice(0, 8)}.bak`);
+      backup = join(undoRoot, "files", `${Date.now()}-${randomUUID().slice(0, 8)}.bak`);
       await copyFile(absolute, backup);
     }
     const entry: UndoEntry = {
@@ -62,59 +67,9 @@ export async function journalFile(
       action: hadOriginal ? "modified" : "created",
       at: Date.now(),
     };
-    await appendJournalEntry(dir, entry);
+    await writeFile(journalPath(undoRoot), JSON.stringify(entry) + "\n", { flag: "a" });
     return entry;
   } catch {
     return null;
-  }
-}
-
-async function appendJournalEntry(dir: string, entry: UndoEntry): Promise<void> {
-  await writeFile(journalPath(dir), JSON.stringify(entry) + "\n", { flag: "a" });
-}
-
-/** Read all journal entries for a task (server side). */
-export async function readJournal(dir: string): Promise<readonly UndoEntry[]> {
-  try {
-    const raw = await readFile(journalPath(dir), "utf8");
-    return raw
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line) as UndoEntry;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is UndoEntry => !!e && typeof e.path === "string");
-  } catch {
-    return [];
-  }
-}
-
-/** Remove the journal + backups for a task. */
-export async function clearJournal(dir: string): Promise<void> {
-  try {
-    await unlink(journalPath(dir));
-  } catch {}
-  try {
-    await rename(dir, `${dir}.consumed-${Date.now()}`);
-  } catch {}
-}
-
-/** Move a backup back over its original path (or delete a created file). */
-export async function restoreEntry(entry: UndoEntry): Promise<boolean> {
-  try {
-    if (entry.backup) {
-      await mkdir(dirname(entry.path), { recursive: true });
-      await copyFile(entry.backup, entry.path);
-      return true;
-    }
-    // Created file (no backup): undo = delete the file if it still exists.
-    await unlink(entry.path).catch(() => {});
-    return true;
-  } catch {
-    return false;
   }
 }

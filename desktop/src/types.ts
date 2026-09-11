@@ -115,7 +115,7 @@ export interface StuckWarningView {
  * tool calls lose their position and multi-turn prompts lose their order.
  */
 export type TimelineEntry =
-  | { kind: "user"; id: string; text: string }
+  | { kind: "user"; id: string; text: string; pending?: boolean }
   /** `thinking` is true while the model is emitting reasoning but no text yet. */
   | { kind: "assistant"; id: string; text: string; streaming: boolean; thinking: boolean }
   | {

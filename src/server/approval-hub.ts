@@ -62,16 +62,21 @@ export class ApprovalHub {
 
   /**
    * Blocking approval request used by the guardrail hook. Registers a pending
-   * record and resolves when mark() lands (approved/denied) or on timeout
-   * (counts as denied — never hang on an unattended dialog).
+   * record and resolves when mark() lands (approved/denied), on timeout
+   * (counts as denied — never hang on an unattended dialog), or when `signal`
+   * aborts (the user pressed Stop — an unanswered dialog must not keep the
+   * session alive; this was the "bash 卡死 + Stop 无效" bug).
    */
-  request(input: {
-    requestId: string;
-    taskId: string;
-    toolName: string;
-    input: Record<string, unknown>;
-    timeoutMs?: number;
-  }): Promise<boolean> {
+  request(
+    input: {
+      requestId: string;
+      taskId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      timeoutMs?: number;
+    },
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     const timeoutMs = input.timeoutMs ?? 5 * 60_000;
     this.record({
       requestId: input.requestId,
@@ -83,19 +88,32 @@ export class ApprovalHub {
     });
 
     return new Promise<boolean>((resolveP) => {
+      let settled = false;
       const settle = (approved: boolean) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         resolveP(approved);
       };
       const waiter: Waiter = settle;
       this.waiters.set(input.requestId, waiter);
+      const onAbort = () => {
+        if (this.waiters.get(input.requestId) === waiter) {
+          this.waiters.delete(input.requestId);
+          this.mark(input.requestId, "expired");
+        }
+        settle(false);
+      };
       const timer = setTimeout(() => {
         if (this.waiters.get(input.requestId) === waiter) {
           this.waiters.delete(input.requestId);
           this.mark(input.requestId, "expired");
-          resolveP(false);
+          settle(false);
         }
       }, timeoutMs);
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 }

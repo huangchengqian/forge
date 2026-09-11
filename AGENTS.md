@@ -25,7 +25,7 @@ A desktop engineering agent that uses LLM as brain and deterministic guardrails 
 The core value of Forge is:
 
 - completion verification (don't trust "model says done")
-- guardrails (permission, undo journal, cost budget, stuck detection)
+- guardrails (permission, write journal, cost budget, stuck detection)
 - recovery (event log, crash resume, audit trail)
 
 ---
@@ -151,7 +151,12 @@ Every tool call is checked before execution.
 
 `beforeToolCall` hook:
 1. Guard policy (capability classification + rule evaluation)
-2. Undo journal (backup file before write/edit)
+2. Write journal (backup file before write/edit — internal insurance that
+   justifies auto-allowing file writes; NOT a user-facing undo. The Diff/Undo
+   product surface was removed 2026-09-11: a partial undo that reads as
+   complete is worse than none. User-facing recovery = git + command approvals.
+   Backups remain on disk under `<forgeHome>/undo/<sessionId>/`, manually
+   recoverable.)
 3. Approval relay (ask → desktop dialog)
 
 A denied tool call is blocked. A destructive tool call terminates the session.
@@ -290,7 +295,8 @@ Sessions are recoverable.
 A crashed session can be resumed because:
 - session state is persisted (session.json)
 - event log has the full history (events.jsonl)
-- undo journal has file backups (journal.jsonl)
+- write journal has before-image backups (journal.jsonl — internal insurance,
+  manually recoverable; not a user-facing undo)
 
 ### Rule 8.2
 
@@ -318,7 +324,6 @@ Every guardrail must have a UI entry point.
 |---|---|
 | Guard ask (approval) | ApprovalDialog (real-time popup) |
 | Completion verification | VerificationPanel (per-run criteria + pass/fail + evidence) |
-| Undo journal | Diff panel + Undo button |
 | Cost budget | CostGauge (spent / budget) |
 | Stuck detection | In-place notice in the transcript |
 | Steering | Mid-run input box |

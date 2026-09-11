@@ -4,7 +4,6 @@ import { eventsDir } from "../core/persistence/event-log.ts";
 import { ApprovalHub } from "./approval-hub.ts";
 import { ProjectsRegistry } from "./projects.ts";
 import { SessionManager } from "./session-manager.ts";
-import { computeDiff, restoreUndo } from "./undo.ts";
 import { isAuthorized, newToken, writeHandshake } from "./auth.ts";
 import { loadForgeConfig, saveForgeConfig, PROVIDER_APIS } from "./config-store.ts";
 import type { ProviderApi } from "./config-store.ts";
@@ -230,22 +229,6 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
             ? await manager.approve(parts[1]!, parts[3]!)
             : await manager.deny(parts[1]!, parts[3]!);
         json(res, result.ok ? 200 : 404, result);
-        return;
-      }
-
-      // --- Diff + Undo ---
-      if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "diff") {
-        const session = await manager.get(parts[1]!);
-        if (!session) {
-          json(res, 404, { error: "not found" });
-          return;
-        }
-        json(res, 200, await computeDiff(opts.forgeHome, parts[1]!, session.workspace));
-        return;
-      }
-
-      if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "undo") {
-        json(res, 200, { ok: true, ...(await restoreUndo(opts.forgeHome, parts[1]!)) });
         return;
       }
 
