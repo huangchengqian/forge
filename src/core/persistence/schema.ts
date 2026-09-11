@@ -114,7 +114,7 @@ function migrateLegacyTaskToSession(raw: Record<string, unknown>): Record<string
     messages: Array.isArray(raw.messages) ? raw.messages : [],
     status,
     failureReason: legacyFailure ?? (status === "cancelled" ? "migrated from legacy task state" : null),
-    cost: { total: 0, budget: null },
+    usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
     trustLevel: "medium",
     thinkingLevel: "off",
     completionCriteria: [],

@@ -11,7 +11,7 @@ import type { ProviderConfig } from "./config-store.ts";
 /**
  * Look up a model in Pi's built-in catalog by id (protocol as a tiebreaker
  * when several providers ship the same model id). Returns real pricing,
- * context window, and reasoning flag — without this, CostGuard sees zero
+ * context window, and reasoning flag — without this, UsageTracker sees zero
  * cost on every real provider and the budget guard is decorative.
  */
 function lookupBuiltinModel(modelId: string, api?: string): Model<any> | null {

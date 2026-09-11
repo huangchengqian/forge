@@ -411,7 +411,7 @@ Does not show:
 
 Guardrails and UI are designed together. Every guardrail hook's output must have a corresponding UI component that can consume it.
 
-Event types must cover everything the UI needs: agent events (message_start/update/end, tool_call, tool_result) AND guardrail events (GUARD_APPROVAL_REQUEST, VERIFICATION_RESULT, COST_UPDATE, STUCK_WARNING, COMPACTION).
+Event types must cover everything the UI needs: agent events (message_start/update/end, tool_call, tool_result) AND guardrail events (GUARD_APPROVAL_REQUEST, VERIFICATION_RESULT, USAGE_UPDATE, STUCK_WARNING, COMPACTION).
 
 HTTP API exists to serve the UI — not the other way around.
 

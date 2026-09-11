@@ -25,7 +25,8 @@ A desktop engineering agent that uses LLM as brain and deterministic guardrails 
 The core value of Forge is:
 
 - completion verification (don't trust "model says done")
-- guardrails (permission, write journal, cost budget, stuck detection)
+- guardrails (permission, write journal, stuck detection)
+- usage/context tracking (token counters + compaction watermark)
 - recovery (event log, crash resume, audit trail)
 
 ---
@@ -179,9 +180,14 @@ All four terminate the session with an honest `failureReason`
 
 ### Rule 5.4
 
-Cost is bounded.
+Usage and context are measured, not budgeted (2026-09-11: the client-side
+cost budget was removed — price estimation was blind for custom endpoints
+and no UI path ever set a budget, so the breaker never fired).
 
-`shouldStopAfterTurn` checks cost budget. When exhausted, session stops.
+`UsageTracker` accumulates per-session token counters and keeps the context
+watermark (`lastContextTokens`); `prepareNextTurn` reads the watermark to
+trigger compaction. Spend limits belong to the provider; turn bounds are
+`maxTurns`.
 
 ### Rule 5.5
 
@@ -324,7 +330,7 @@ Every guardrail must have a UI entry point.
 |---|---|
 | Guard ask (approval) | ApprovalDialog (real-time popup) |
 | Completion verification | VerificationPanel (per-run criteria + pass/fail + evidence) |
-| Cost budget | CostGauge (spent / budget) |
+| Usage & context | header token meter (↑in ↓out · ctx watermark) |
 | Stuck detection | In-place notice in the transcript |
 | Steering | Mid-run input box |
 | Streaming | SessionView (real-time conversation) |

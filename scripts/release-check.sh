@@ -54,7 +54,7 @@ check "approval-hub tests"    "cd $ROOT && node --import tsx --test src/server/a
 check "config-store tests"   "cd $ROOT && node --import tsx --test src/server/config-store.test.ts"
 check "model discovery tests" "cd $ROOT && node --import tsx --test src/server/model-discovery.test.ts"
 check "stuck-detector tests" "cd $ROOT && node --import tsx --test src/guardrails/stuck-detector.test.ts"
-check "cost-guard tests"     "cd $ROOT && node --import tsx --test src/guardrails/cost-guard.test.ts"
+check "usage tracker tests"     "cd $ROOT && node --import tsx --test src/guardrails/usage-tracker.test.ts"
 check "compaction tests"     "cd $ROOT && node --import tsx --test src/guardrails/compaction.test.ts"
 
 echo ""

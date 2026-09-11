@@ -10,7 +10,7 @@ import {
   DEFAULT_COMPACTION_THRESHOLD,
   DEFAULT_KEEP_RECENT_MESSAGES,
 } from "./compaction.ts";
-import { CostGuard } from "./cost-guard.ts";
+import { UsageTracker } from "./usage-tracker.ts";
 
 function userMsg(text: string): AgentMessage {
   return {
@@ -44,11 +44,11 @@ function capturedEvents(): Array<{ type: string; payload: Record<string, unknown
 
 describe("makePrepareNextTurn (truncate-mode compaction)", () => {
   test("returns undefined when lastInputTokens is null (no usage yet)", async () => {
-    const costGuard = new CostGuard(null);
+    const usage = new UsageTracker();
     const events = capturedEvents();
     const prepare = makePrepareNextTurn({
       sessionId: "x",
-      costGuard,
+      usage,
       emitEvent: (type, payload) => {
         events.push({ type, payload });
         return Promise.resolve();
@@ -62,12 +62,12 @@ describe("makePrepareNextTurn (truncate-mode compaction)", () => {
   });
 
   test("returns undefined when lastInputTokens <= threshold", async () => {
-    const costGuard = new CostGuard(null);
-    costGuard.hydrate(0, 100_000);
+    const usage = new UsageTracker();
+    usage.hydrate({ lastContextTokens: 100_000 });
     const events = capturedEvents();
     const prepare = makePrepareNextTurn({
       sessionId: "x",
-      costGuard,
+      usage,
       thresholdTokens: 120_000,
       emitEvent: (type, payload) => {
         events.push({ type, payload });
@@ -81,12 +81,12 @@ describe("makePrepareNextTurn (truncate-mode compaction)", () => {
   });
 
   test("returns undefined when message count <= keepRecent (don't drop goal)", async () => {
-    const costGuard = new CostGuard(null);
-    costGuard.hydrate(0, 200_000); // above threshold
+    const usage = new UsageTracker();
+    usage.hydrate({ lastContextTokens: 200_000 }); // above threshold
     const events = capturedEvents();
     const prepare = makePrepareNextTurn({
       sessionId: "x",
-      costGuard,
+      usage,
       thresholdTokens: 120_000,
       keepRecentMessages: 5,
       emitEvent: (type, payload) => {
@@ -102,12 +102,12 @@ describe("makePrepareNextTurn (truncate-mode compaction)", () => {
   });
 
   test("truncates to keepRecentMessages and emits COMPACTION event", async () => {
-    const costGuard = new CostGuard(null);
-    costGuard.hydrate(0, 200_000); // above threshold
+    const usage = new UsageTracker();
+    usage.hydrate({ lastContextTokens: 200_000 }); // above threshold
     const events = capturedEvents();
     const prepare = makePrepareNextTurn({
       sessionId: "s1",
-      costGuard,
+      usage,
       thresholdTokens: 120_000,
       keepRecentMessages: 3,
       emitEvent: (type, payload) => {
@@ -143,11 +143,11 @@ describe("makePrepareNextTurn (truncate-mode compaction)", () => {
   });
 
   test("does not break the loop when emitEvent throws", async () => {
-    const costGuard = new CostGuard(null);
-    costGuard.hydrate(0, 200_000);
+    const usage = new UsageTracker();
+    usage.hydrate({ lastContextTokens: 200_000 });
     const prepare = makePrepareNextTurn({
       sessionId: "s1",
-      costGuard,
+      usage,
       thresholdTokens: 120_000,
       keepRecentMessages: 3,
       emitEvent: () => Promise.reject(new Error("disk full")),
@@ -183,12 +183,12 @@ describe("makePrepareNextTurn (llm-summary compaction)", () => {
   }
 
   test("llm-summary replaces history with summary + retained tail", async () => {
-    const costGuard = new CostGuard(null);
-    costGuard.hydrate(0, 200_000); // above threshold
+    const usage = new UsageTracker();
+    usage.hydrate({ lastContextTokens: 200_000 }); // above threshold
     const events = capturedEvents();
     const prepare = makePrepareNextTurn({
       sessionId: "s1",
-      costGuard,
+      usage,
       thresholdTokens: 120_000,
       keepRecentMessages: 3,
       emitEvent: (type, payload) => {
@@ -227,12 +227,12 @@ describe("makePrepareNextTurn (llm-summary compaction)", () => {
   });
 
   test("falls back to truncate when the summary call fails", async () => {
-    const costGuard = new CostGuard(null);
-    costGuard.hydrate(0, 200_000);
+    const usage = new UsageTracker();
+    usage.hydrate({ lastContextTokens: 200_000 });
     const events = capturedEvents();
     const prepare = makePrepareNextTurn({
       sessionId: "s1",
-      costGuard,
+      usage,
       thresholdTokens: 120_000,
       keepRecentMessages: 3,
       emitEvent: (type, payload) => {

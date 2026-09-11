@@ -59,8 +59,7 @@ export interface DesktopState {
 const emptyConversation = (): ConversationView => ({
   timeline: [],
   verification: [],
-  costSpent: 0,
-  costBudget: null,
+  usage: { tokensIn: 0, tokensOut: 0, contextTokens: null },
   modelId: null,
   trustLevel: null,
   thinkingLevel: null,
@@ -293,10 +292,16 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
       return { conversation };
     }
 
-    case "COST_UPDATE": {
-      conversation.costSpent = typeof payload.spent === "number" ? payload.spent : conversation.costSpent;
-      conversation.costBudget =
-        typeof payload.budget === "number" ? payload.budget : conversation.costBudget;
+    case "COST_UPDATE":
+      // Historical logs only — the dollar layer was removed 2026-09-11.
+      return {};
+    case "USAGE_UPDATE": {
+      conversation.usage = {
+        tokensIn: typeof payload.tokensIn === "number" ? payload.tokensIn : conversation.usage.tokensIn,
+        tokensOut: typeof payload.tokensOut === "number" ? payload.tokensOut : conversation.usage.tokensOut,
+        contextTokens:
+          typeof payload.contextTokens === "number" ? payload.contextTokens : conversation.usage.contextTokens,
+      };
       return { conversation };
     }
 

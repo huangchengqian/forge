@@ -15,7 +15,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model, Usage } from "@earendil-works/pi-ai";
-import type { CostGuard } from "./cost-guard.ts";
+import type { UsageTracker } from "./usage-tracker.ts";
 
 /**
  * Default thresholds. 120K input tokens is 60% of a 200K context window —
@@ -73,7 +73,7 @@ function toVirtualEntries(messages: AgentMessage[]): Entry[] {
  * Trigger policy:
  *   - Pending runtime switches are returned first, unconditionally — they are
  *     operator actions, not a consequence of context pressure.
- *   - Read `costGuard.getLastInputTokens()` (the most recent assistant
+ *   - Read `usage.getLastContextTokens()` (the most recent assistant
  *     message's reported input token count — authoritative provider-side).
  *   - If it exceeds `thresholdTokens`, compact.
  *
@@ -95,7 +95,7 @@ function toVirtualEntries(messages: AgentMessage[]): Entry[] {
  */
 export function makePrepareNextTurn(opts: {
   sessionId: string;
-  costGuard: CostGuard;
+  usage: UsageTracker;
   thresholdTokens?: number;
   keepRecentMessages?: number;
   emitEvent: (type: string, payload: Record<string, unknown>) => Promise<unknown>;
@@ -125,7 +125,7 @@ export function makePrepareNextTurn(opts: {
     const debug = process.env.FORGE_DEBUG_COMPACTION === "1";
     // Timing note: Pi's emit pushes events without awaiting the consumer, so
     // the hook can fire BEFORE the runner's for-await has processed this
-    // turn's message_end (and thus before costGuard.trackUsage ran). Read
+    // turn's message_end (and thus before usage.trackUsage ran). Read
     // the completed turn's own usage from the hook argument instead — it is
     // always present and timing-safe; costGuard is the fallback.
     const lastTurnUsage = (ctx.message as { usage?: Usage } | undefined)?.usage;
@@ -135,7 +135,7 @@ export function makePrepareNextTurn(opts: {
     const lastInput =
       Number.isFinite(lastTurnContext) && lastTurnContext > 0
         ? lastTurnContext
-        : opts.costGuard.getLastInputTokens();
+        : opts.usage.getLastContextTokens();
     if (debug) {
       console.error(`[compaction] hook fired: lastInput=${lastInput} threshold=${threshold} messages=${ctx.context.messages.length}`);
     }

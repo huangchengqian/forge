@@ -11,7 +11,7 @@ import { readEvents, type PersistedEvent } from "./event-log.ts";
  * NOT replayed — they describe guardrail activity, not conversation state.
  * Recovering guardrail state would mean re-running policy decisions on
  * historical events, which we don't want; instead, the session's persisted
- * `cost.total` is loaded separately and fed into a fresh CostGuard.
+ * `cost.total` is loaded separately and fed into a fresh UsageTracker.
  *
  * Note on pairing: Pi's `AgentMessage` (UserMessage / AssistantMessage /
  * ToolResultMessage) has no `id` field — id is a `SessionEntry` concept

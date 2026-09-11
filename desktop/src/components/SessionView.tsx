@@ -81,19 +81,40 @@ function VerificationPanel() {
   );
 }
 
-function CostGauge({ spent, budget }: { spent: number; budget: number | null }) {
-  if (spent <= 0) return null;
-  const ratio = budget && budget > 0 ? Math.min(spent / budget, 1) : null;
-  // Sub-cent runs are the common case early on — "$0.00" reads as broken.
-  const label = spent < 0.01 ? "<$0.01" : `$${spent.toFixed(2)}`;
+function fmtK(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+}
+
+/** Token usage meter — cumulative in/out plus the context watermark. */
+function TokenMeter({
+  usage,
+  contextWindow,
+}: {
+  usage: { tokensIn: number; tokensOut: number; contextTokens: number | null };
+  contextWindow: number | null;
+}) {
+  if (usage.tokensIn === 0 && usage.tokensOut === 0) return null;
+  const ratio =
+    contextWindow !== null && contextWindow > 0 && usage.contextTokens
+      ? Math.min(usage.contextTokens / contextWindow, 1)
+      : null;
   return (
     <span
-      className="cost"
+      className="tok"
       data-tight={ratio !== null && ratio > 0.75 ? "true" : undefined}
-      title={budget !== null ? `$${spent.toFixed(4)} of $${budget} budget` : `$${spent.toFixed(4)} spent`}
+      title={
+        contextWindow !== null && usage.contextTokens !== null
+          ? `Context ${usage.contextTokens} / ${contextWindow} tokens`
+          : "Cumulative token usage"
+      }
     >
-      {label}
-      {budget !== null && <span className="cost-cap"> / ${budget}</span>}
+      ↑{fmtK(usage.tokensIn)} ↓{fmtK(usage.tokensOut)}
+      {usage.contextTokens !== null && (
+        <span className="tok-ctx">
+          {" "}· ctx {fmtK(usage.contextTokens)}
+          {contextWindow !== null ? ` / ${fmtK(contextWindow)}` : ""}
+        </span>
+      )}
     </span>
   );
 }
@@ -137,6 +158,8 @@ export function SessionView({
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   /** Thinking levels each subscription's model supports, per the server. */
   const [capabilities, setCapabilities] = useState<Record<string, ThinkingLevel[]>>({});
+  /** Context window per subscription's model (server-derived from Pi's catalog). */
+  const [contextWindows, setContextWindows] = useState<Record<string, number>>({});
   const running = status === "running";
   const resumable = status === "failed" || status === "cancelled";
   const canFollowUp = status === "completed";
@@ -162,6 +185,7 @@ export function SessionView({
       .then((cfg) => {
         setProviders(cfg.providers);
         setCapabilities(cfg.modelCapabilities ?? {});
+        setContextWindows(cfg.modelContextWindows ?? {});
       })
       .catch(() => {});
   }, []);
@@ -255,7 +279,7 @@ export function SessionView({
       <header className="session-head">
         <div className="session-head-inner">
           <h1 className="session-goal" title={goal}>{goal}</h1>
-          <CostGauge spent={conversation.costSpent} budget={conversation.costBudget} />
+          <TokenMeter usage={conversation.usage} contextWindow={activeProviderId ? (contextWindows[activeProviderId] ?? null) : null} />
           <div className="head-actions">
             {resumable && (
               <button

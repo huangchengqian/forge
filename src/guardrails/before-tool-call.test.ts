@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeBeforeToolCall } from "./before-tool-call.ts";
-import { CostGuard } from "./cost-guard.ts";
+import { UsageTracker } from "./usage-tracker.ts";
 import type { GuardrailConfig } from "./types.ts";
 import type { Session } from "../types.ts";
 
@@ -35,7 +35,7 @@ function stubSession(workspace: string): Session {
     messages: [],
     status: "running",
     failureReason: null,
-    cost: { total: 0, budget: null },
+    usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
     trustLevel: "medium",
     thinkingLevel: "off",
     completionCriteria: [],
@@ -52,10 +52,10 @@ function config(undoRoot: string): GuardrailConfig {
     workspace: WS,
     undoRoot,
     session: stubSession(WS),
-    completion: { trustLevel: "medium", criteria: [], maxCost: null, maxTurns: null },
+    completion: { trustLevel: "medium", criteria: [],  maxTurns: null },
     approval: { request: async () => true },
     steeringQueue: [],
-    costGuard: new CostGuard(null),
+    usage: new UsageTracker(),
   };
 }
 

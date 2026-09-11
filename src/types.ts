@@ -28,7 +28,8 @@ export interface Session {
   messages: AgentMessage[];
   status: SessionStatus;
   failureReason: string | null;
-  cost: { total: number; budget: number | null };
+  /** Cumulative token usage + context watermark (persisted; hydrates UsageTracker on resume). */
+  usage: SessionUsage;
   trustLevel: TrustLevel;
   /**
    * Reasoning effort sent with every provider request. Persisted since
@@ -43,9 +44,18 @@ export interface Session {
   updatedAt: number;
 }
 
+/** Cumulative token usage for a session (fed from assistant-message usage). */
+export interface SessionUsage {
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Latest assistant turn's context size — the compaction watermark. */
+  lastContextTokens: number | null;
+}
+
 export interface CompletionConfig {
   trustLevel: TrustLevel;
   criteria: SuccessCriterion[];
-  maxCost: number | null;
   maxTurns: number | null;
 }

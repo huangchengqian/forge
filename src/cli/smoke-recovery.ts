@@ -104,7 +104,7 @@ async function main(): Promise<void> {
       messages: [],
       status: "failed",
       failureReason: "simulated failure",
-      cost: { total: 0.123, budget: 1.0 }, // ← spend to test hydrate
+      usage: { tokensIn: 123, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null }, // ← tokens to test hydrate
       trustLevel: "low",
       thinkingLevel: "off",
       completionCriteria: [],
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
 
     // 4. Wire SessionManager and call resume() — without a real LLM, this
     //    verifies the SessionManager plumbing: status check, replay,
-    //    costGuard.hydrate, launchAgent path. We override streamFn to
+    //    usage.hydrate, launchAgent path. We override streamFn to
     //    immediately emit done.
     const approvalHub = new ApprovalHub();
     const projects = new ProjectsRegistry(forgeHome);
@@ -169,14 +169,14 @@ async function main(): Promise<void> {
     //    mock loop added (1 prompt + 1 assistant = 5 total).
     const after = await loadSession(sessionId);
     const messagesOk = after !== null && after.messages.length >= 3;
-    const costOk = after !== null && typeof after.cost.total === "number";
-    // Note: cost.total from hydrate (0.123) gets added to by trackUsage during
-    // the mock loop's assistant message. The persisted cost.total reflects
+    const usageOk = after !== null && typeof after.usage.tokensIn === "number";
+    // Note: tokensIn from hydrate (123) gets added to by trackUsage during
+    // the mock loop's assistant message. The persisted usage reflects
     // both — we only assert it is a finite number, not the exact value.
-    ok = ok && messagesOk && costOk;
+    ok = ok && messagesOk && usageOk;
     console.log(
-      `  session after resume: status=${after?.status} messages=${after?.messages.length} cost.total=${after?.cost.total} → ${
-        messagesOk && costOk ? "OK" : "FAIL"
+      `  session after resume: status=${after?.status} messages=${after?.messages.length} tokensIn=${after?.usage.tokensIn} → ${
+        messagesOk && usageOk ? "OK" : "FAIL"
       }`,
     );
 

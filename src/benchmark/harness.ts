@@ -14,7 +14,7 @@ import { runAgent } from "../agent-runner.ts";
 import { readEvents, type PersistedEvent } from "../core/persistence/event-log.ts";
 import { saveSession } from "../core/persistence/session-store.ts";
 import { appendEvent } from "../core/persistence/event-log.ts";
-import { CostGuard } from "../guardrails/cost-guard.ts";
+import { UsageTracker } from "../guardrails/usage-tracker.ts";
 import type { GuardrailConfig } from "../guardrails/types.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Session, TrustLevel } from "../types.ts";
@@ -79,7 +79,7 @@ export async function runGoldenTask(task: GoldenTask): Promise<TaskReport> {
       messages: [],
       status: "running",
       failureReason: null,
-      cost: { total: 0, budget: null },
+      usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
       trustLevel: task.trustLevel,
       thinkingLevel: "off",
       completionCriteria: task.criteria,
@@ -101,12 +101,12 @@ export async function runGoldenTask(task: GoldenTask): Promise<TaskReport> {
       completion: {
         trustLevel: task.trustLevel,
         criteria: task.criteria,
-        maxCost: null,
+        
         maxTurns: task.maxTurns,
       },
       approval: { request: async () => true },
       steeringQueue,
-      costGuard: new CostGuard(null),
+      usage: new UsageTracker(),
     };
 
     const started = Date.now();

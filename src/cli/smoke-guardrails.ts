@@ -24,7 +24,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "../core/persistence/event-log.ts";
-import { CostGuard } from "../guardrails/cost-guard.ts";
+import { UsageTracker } from "../guardrails/usage-tracker.ts";
 import { makeBeforeToolCall } from "../guardrails/before-tool-call.ts";
 import { makeAfterToolCall } from "../guardrails/after-tool-call.ts";
 import { makeTransformContext } from "../guardrails/transform-context.ts";
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     messages: [],
     status: "running",
     failureReason: null,
-    cost: { total: 0, budget: null },
+    usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
     trustLevel: "medium",
     thinkingLevel: "off",
     completionCriteria: [],
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     workspace,
     undoRoot: join(workspace, ".forge-undo"),
     session,
-    completion: { trustLevel: "medium", criteria: [], maxCost: null, maxTurns: null },
+    completion: { trustLevel: "medium", criteria: [],  maxTurns: null },
     // Simulated user: denies every approval.
     approval: {
       request: async () => {
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
       },
     },
     steeringQueue: [],
-    costGuard: new CostGuard(null),
+    usage: new UsageTracker(),
   };
 
   let callIndex = 0;

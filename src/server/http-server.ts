@@ -8,7 +8,7 @@ import { isAuthorized, newToken, writeHandshake } from "./auth.ts";
 import { loadForgeConfig, saveForgeConfig, PROVIDER_APIS } from "./config-store.ts";
 import type { ProviderApi } from "./config-store.ts";
 import { discoverModels } from "./model-discovery.ts";
-import { modelThinkingLevels } from "./model-resolver.ts";
+import { buildModel, modelThinkingLevels } from "./model-resolver.ts";
 import type { ThinkingLevel } from "../types.ts";
 
 /** Pi's full thinking-level set — see pi-ai's ThinkingLevel / ModelThinkingLevel. */
@@ -73,7 +73,6 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
           ...(body.trustLevel ? { trustLevel: body.trustLevel } : {}),
           ...(body.thinkingLevel ? { thinkingLevel: body.thinkingLevel } : {}),
           ...(Array.isArray(body.criteria) ? { criteria: body.criteria } : {}),
-          ...(typeof body.maxCost === "number" ? { maxCost: body.maxCost } : {}),
           ...(typeof body.maxTurns === "number" ? { maxTurns: body.maxTurns } : {}),
         });
         json(res, 202, result);
@@ -239,10 +238,14 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
         // model actually supports. The picker offers only these, so a level
         // that would silently no-op is never shown.
         const modelCapabilities: Record<string, string[]> = {};
+        // Derived as well: each model's context window, so the token meter
+        // can render the context watermark against real capacity.
+        const modelContextWindows: Record<string, number> = {};
         for (const provider of cfg.providers) {
           modelCapabilities[provider.id] = modelThinkingLevels(provider);
+          modelContextWindows[provider.id] = buildModel(provider).contextWindow;
         }
-        json(res, 200, { ...cfg, modelCapabilities });
+        json(res, 200, { ...cfg, modelCapabilities, modelContextWindows });
         return;
       }
 

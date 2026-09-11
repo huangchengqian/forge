@@ -109,7 +109,7 @@ export async function runAgent(opts: {
     // call rides on the same key without keys landing in persisted data.
     config.prepareNextTurn = makePrepareNextTurn({
       sessionId: session.id,
-      costGuard: guardrails.costGuard,
+      usage: guardrails.usage,
       emitEvent: (type, payload) => appendEvent(session.id, type as Parameters<typeof appendEvent>[1], payload),
       takeModelSwitch,
       takeThinkingSwitch,
@@ -142,16 +142,20 @@ export async function runAgent(opts: {
     if (mapped) {
       await appendEvent(session.id, mapped.type, mapped.payload);
     }
-    // Cost tracking from assistant usage (authoritative per-message totals).
+    // Usage tracking from assistant usage (authoritative per-message totals).
     if (event.type === "message_end" && guardrails) {
       const message = event.message as { role?: string; usage?: unknown };
       if (message.role === "assistant" && message.usage) {
-        guardrails.costGuard.trackUsage(
-          message.usage as Parameters<typeof guardrails.costGuard.trackUsage>[0],
+        guardrails.usage.trackUsage(
+          message.usage as Parameters<typeof guardrails.usage.trackUsage>[0],
         );
-        await appendEvent(session.id, "COST_UPDATE", {
-          spent: guardrails.costGuard.getSpent(),
-          budget: guardrails.costGuard.getRemaining(),
+        const s = guardrails.usage.snapshot();
+        await appendEvent(session.id, "USAGE_UPDATE", {
+          tokensIn: s.tokensIn,
+          tokensOut: s.tokensOut,
+          cacheRead: s.cacheRead,
+          cacheWrite: s.cacheWrite,
+          contextTokens: s.lastContextTokens,
         });
       }
     }

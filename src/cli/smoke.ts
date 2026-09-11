@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     messages: [],
     status: "running",
     failureReason: null,
-    cost: { total: 0, budget: null },
+    usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
     trustLevel: "low",
     thinkingLevel: "off",
     completionCriteria: [],

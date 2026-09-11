@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgent } from "../agent-runner.ts";
 import { appendEvent, readEvents } from "../core/persistence/event-log.ts";
-import { CostGuard } from "../guardrails/cost-guard.ts";
+import { UsageTracker } from "../guardrails/usage-tracker.ts";
 import type { GuardrailConfig } from "../guardrails/types.ts";
 import type { Session } from "../types.ts";
 
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     messages: [],
     status: "running",
     failureReason: null,
-    cost: { total: 0, budget: null },
+    usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
     trustLevel: "high",
     thinkingLevel: "off",
     completionCriteria: [{ kind: "file_contains", path: "hello.txt", pattern: "export" }],
@@ -157,12 +157,12 @@ async function main(): Promise<void> {
     completion: {
       trustLevel: "high",
       criteria: session.completionCriteria,
-      maxCost: null,
+      
       maxTurns: 12,
     },
     approval: { request: async () => true },
     steeringQueue,
-    costGuard: new CostGuard(null),
+    usage: new UsageTracker(),
   };
 
   const final = await runAgent({

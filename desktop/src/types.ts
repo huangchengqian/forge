@@ -49,6 +49,8 @@ export interface ForgeConfigData {
    * so a config from an older server still parses.
    */
   modelCapabilities?: Record<string, ThinkingLevel[]>;
+  /** Derived by the server (never persisted): each model's context window, for the token meter. */
+  modelContextWindows?: Record<string, number>;
 }
 
 export interface ProjectRecord {
@@ -135,8 +137,8 @@ export type TimelineEntry =
 export interface ConversationView {
   timeline: TimelineEntry[];
   verification: VerificationView[];
-  costSpent: number;
-  costBudget: number | null;
+  /** Cumulative token usage + context watermark (USAGE_UPDATE events). */
+  usage: { tokensIn: number; tokensOut: number; contextTokens: number | null };
   /** Updated by MODEL_CHANGED events (mid-session model switch). */
   modelId: string | null;
   /** Updated by TRUST_CHANGED events (mid-session verification switch). */

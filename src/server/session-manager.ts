@@ -35,7 +35,7 @@ type SessionRuntime = {
   runPromise: Promise<Session>;
   controller: AbortController;
   steeringQueue: AgentMessage[];
-  costGuard: import("../guardrails/cost-guard.ts").CostGuard;
+  usage: import("../guardrails/usage-tracker.ts").UsageTracker;
   /**
    * Live completion config — the *same object* handed to the guardrails in
    * `launchAgent`. `makeShouldStopAfterTurn` re-reads `config.completion` at
@@ -97,7 +97,6 @@ export class SessionManager {
     trustLevel?: TrustLevel | undefined;
     thinkingLevel?: ThinkingLevel | undefined;
     criteria?: SuccessCriterion[] | undefined;
-    maxCost?: number | undefined;
     maxTurns?: number | undefined;
     kind?: "conversation" | "task" | undefined;
   }): Promise<{ sessionId: string }> {
@@ -133,7 +132,7 @@ export class SessionManager {
       messages: [],
       status: "running",
       failureReason: null,
-      cost: { total: 0, budget: input.maxCost ?? null },
+      usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
       trustLevel,
       thinkingLevel,
       completionCriteria: input.criteria ?? [],
@@ -146,17 +145,14 @@ export class SessionManager {
     await appendEvent(sessionId, "SESSION_CREATED", { goal: session.goal, workspace });
 
     // 4. Guardrails + launch (launchAgent registers the runtime).
-    const costGuard = new (await import("../guardrails/cost-guard.ts")).CostGuard(
-      input.maxCost ?? null,
-    );
+    const usage = new (await import("../guardrails/usage-tracker.ts")).UsageTracker();
     await this.launchAgent(
       session,
       subscription,
-      costGuard,
+      usage,
       {
         trustLevel,
         criteria: input.criteria ?? [],
-        maxCost: input.maxCost ?? null,
         maxTurns: input.maxTurns ?? null,
       },
     );
@@ -167,7 +163,7 @@ export class SessionManager {
   /**
    * Resume a failed or cancelled session from its event log. Replays the
    * last coherent AgentMessage[] (drops any unterminated message_started
-   * pair), restores the CostGuard's spent counter from persisted
+   * pair), restores the UsageTracker's spent counter from persisted
    * `session.cost.total`, and re-launches the agent loop on the recovered
    * session.
    *
@@ -241,7 +237,7 @@ export class SessionManager {
       hasSteeringMessage: !!opts?.message,
     }).catch(() => {});
 
-    // 8. CostGuard hydrates from persisted cost.
+    // 8. UsageTracker hydrates from persisted token counters.
     const cfg = await loadForgeConfig(this.opts.forgeHome);
     const subscription: ProviderConfig | null = resolveProvider(cfg, session.model.provider);
     if (!subscription) {
@@ -249,10 +245,8 @@ export class SessionManager {
         `no model subscription for provider "${session.model.provider}" — re-add it in Settings`,
       );
     }
-    const costGuard = new (await import("../guardrails/cost-guard.ts")).CostGuard(
-      session.cost.budget,
-    );
-    costGuard.hydrate(session.cost.total);
+    const usage = new (await import("../guardrails/usage-tracker.ts")).UsageTracker();
+    usage.hydrate(session.usage);
 
     // 9. Launch (re-uses helper). Semantics by prior state:
     //   - failed/cancelled → retry: prompt = goal, message rides the
@@ -265,13 +259,12 @@ export class SessionManager {
       trustLevel: session.trustLevel,
       criteria: session.completionCriteria,
       // Turn budget is persisted since schema v5 and survives resume.
-      maxCost: session.cost.budget,
       maxTurns: session.maxTurns,
     };
     await this.launchAgent(
       session,
       subscription,
-      costGuard,
+      usage,
       launchOpts,
       wasCompleted ? opts?.message : undefined,
     );
@@ -397,7 +390,7 @@ export class SessionManager {
   private async launchAgent(
     session: Session,
     subscription: ProviderConfig,
-    costGuard: import("../guardrails/cost-guard.ts").CostGuard,
+    usage: import("../guardrails/usage-tracker.ts").UsageTracker,
     completion: CompletionConfig,
     promptOverride?: string | undefined,
   ): Promise<SessionRuntime> {
@@ -406,7 +399,7 @@ export class SessionManager {
       runPromise: Promise.resolve(session),
       controller: new AbortController(),
       steeringQueue: [],
-      costGuard,
+      usage,
       completion,
       pendingModel: null,
       pendingThinking: null,
@@ -428,7 +421,7 @@ export class SessionManager {
         completion,
         approval: this.opts.approvalHub,
         steeringQueue: runtime.steeringQueue,
-        costGuard,
+        usage,
       },
       signal: runtime.controller.signal,
       promptOverride,
@@ -524,15 +517,11 @@ export class SessionManager {
     this.runtimes.delete(sessionId);
     const status: SessionStatus = final.failureReason ? "failed" : "completed";
     final.status = status;
-    final.cost = {
-      ...final.cost,
-      total: runtime ? runtime.costGuard.getSpent() : final.cost.total,
-    };
+    if (runtime) final.usage = runtime.usage.snapshot();
     final.updatedAt = Date.now();
     void saveSession(final);
     void appendEvent(sessionId, status === "failed" ? "SESSION_FAILED" : "SESSION_ENDED", {
       status,
-      cost: final.cost.total,
     }).catch(() => {});
   }
 }

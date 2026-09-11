@@ -23,6 +23,7 @@ export type ControlEventType =
   // guardrails
   | "STEERING_QUEUED"
   | "VERIFICATION_RESULT"
+  | "USAGE_UPDATE"
   | "COST_UPDATE"
   | "STUCK_WARNING"
   | "GUARD_BLOCKED"

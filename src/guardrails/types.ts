@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { CompletionConfig, Session } from "../types.ts";
-import type { CostGuard } from "./cost-guard.ts";
+import type { UsageTracker } from "./usage-tracker.ts";
 
 /**
  * Minimal approval surface used by guardrail hooks. The concrete hub lives
@@ -34,5 +34,5 @@ export interface GuardrailConfig {
   completion: CompletionConfig;
   approval: ApprovalRelay;
   steeringQueue: AgentMessage[];
-  costGuard: CostGuard;
+  usage: UsageTracker;
 }

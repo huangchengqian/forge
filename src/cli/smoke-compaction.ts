@@ -24,17 +24,17 @@ async function main(): Promise<void> {
 
   try {
     const { makePrepareNextTurn } = await import("../guardrails/compaction.ts");
-    const { CostGuard } = await import("../guardrails/cost-guard.ts");
+    const { UsageTracker } = await import("../guardrails/usage-tracker.ts");
 
     const sessionId = `s_compaction_${Date.now()}`;
-    const costGuard = new CostGuard(null);
+    const usage = new UsageTracker();
     // Simulate having received a usage report with input > threshold.
-    costGuard.hydrate(0, 200_000);
+    usage.hydrate({ lastContextTokens: 200_000 });
 
     const captured: Array<{ type: string; payload: Record<string, unknown> }> = [];
     const prepare = makePrepareNextTurn({
       sessionId,
-      costGuard,
+      usage,
       thresholdTokens: 120_000,
       keepRecentMessages: 3,
       emitEvent: (type, payload) => {

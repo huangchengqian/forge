@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeShouldStopAfterTurn } from "./should-stop-after-turn.ts";
-import { CostGuard } from "./cost-guard.ts";
+import { UsageTracker } from "./usage-tracker.ts";
 import type { GuardrailConfig } from "./types.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Session, TrustLevel } from "../types.ts";
@@ -31,7 +31,7 @@ function makeSession(kind: Session["kind"]): Session {
     messages: [],
     status: "running",
     failureReason: null,
-    cost: { total: 0, budget: null },
+    usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
     trustLevel: "medium",
     thinkingLevel: "off",
     completionCriteria: [],
@@ -56,7 +56,7 @@ function makeConfig(
     workspace: session.workspace,
     undoRoot: join(TMP, "undo"),
     session,
-    completion: { trustLevel, criteria, maxCost: null, maxTurns: null },
+    completion: { trustLevel, criteria,  maxTurns: null },
     approval: { request: async () => true },
     steeringQueue: {
       push: (m: AgentMessage) => {
@@ -64,7 +64,7 @@ function makeConfig(
         steered.push((c ?? []).map((b) => (b.type === "text" ? b.text ?? "" : "")).join(""));
       },
     } as unknown as GuardrailConfig["steeringQueue"],
-    costGuard: new CostGuard(null),
+    usage: new UsageTracker(),
   };
   return { config, steered };
 }

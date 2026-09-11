@@ -27,7 +27,9 @@ function steer(text: string): AgentMessage {
  *    truncated / empty / API-error turns get steering retries (max 3 each)
  *    before anything is surfaced — a transient provider hiccup must never
  *    kill a long-running session.
- * 2. Hard stoppers: cost budget exhausted, maxTurns reached.
+ * 2. Hard stopper: maxTurns reached. (Cost budget retired 2026-09-11 —
+ *    spend limits belong to the provider; the client-side estimator was
+ *    blind for custom endpoints.)
  * 3. Model still working (stopReason === "toolUse") → never stop. Running
  *    verification mid-work would both corrupt the run and burn budget.
  * 4. Model intends to stop → completion verification by trust level:
@@ -113,12 +115,9 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
     }
 
     // --- 2. Hard stoppers ---
-    if (config.costGuard.isExhausted()) {
-      // Abandonment must be visible: a budget-killed run is not "completed".
-      config.session.failureReason ??= "cost budget exhausted";
-      await recordVerification(false, "cost budget exhausted").catch(() => {});
-      return true;
-    }
+    // (Cost budget was removed 2026-09-11: client-side price estimation was
+    // blind for custom endpoints and no UI path ever set a budget. Spend
+    // limits belong to the provider; turn bounds are maxTurns below.)
     if (config.completion.maxTurns !== null && turnCount >= config.completion.maxTurns) {
       config.session.failureReason ??= "max turns reached";
       await recordVerification(false, "max turns reached").catch(() => {});

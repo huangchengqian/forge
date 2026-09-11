@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     const notes = join(workspace, "big.txt");
 
     console.log(`  state: ${session?.status} (reason: ${session?.failureReason})`);
-    console.log(`  cost: $${session?.cost.total?.toFixed(6)}`);
+    console.log(`  usage: ${JSON.stringify(session?.usage)}`);
     console.log(`  COST_UPDATE payloads: ${JSON.stringify(costUpdates)}`);
     console.log(`  COMPACTION events: ${JSON.stringify(compaction.map((e) => e.payload))}`);
     console.log(`  notes.txt exists: ${existsSync(notes)} content: ${existsSync(notes) ? JSON.stringify(readFileSync(notes, "utf8").slice(0, 60)) : "-"}`);

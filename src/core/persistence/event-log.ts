@@ -46,6 +46,10 @@ export type PersistedEventType =
   // guardrails (Phase 3+; reserved so event types cover everything the UI renders)
   | "STEERING_QUEUED"
   | "VERIFICATION_RESULT"
+  // Per-session token usage (2026-09-11, replaces COST_UPDATE for new logs;
+  // COST_UPDATE stays in the union because historical logs contain it).
+  // Payload shape: { tokensIn, tokensOut, cacheRead, cacheWrite, contextTokens }
+  | "USAGE_UPDATE"
   | "COST_UPDATE"
   | "STUCK_WARNING"
   // Phase 3: tool-policy boundaries (added with the EventBus collapse — see
@@ -84,6 +88,7 @@ const CONTROL_EVENT_TYPES: ReadonlySet<PersistedEventType> = new Set<PersistedEv
   "SESSION_CANCELLED",
   "STEERING_QUEUED",
   "VERIFICATION_RESULT",
+  "USAGE_UPDATE",
   "COST_UPDATE",
   "STUCK_WARNING",
   "GUARD_BLOCKED",

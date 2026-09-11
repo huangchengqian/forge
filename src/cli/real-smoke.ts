@@ -85,7 +85,7 @@ async function main(): Promise<void> {
     const thinkLeak = textJoined.includes("<think>");
 
     console.log(`  state: ${session?.status} (reason: ${session?.failureReason})`);
-    console.log(`  cost: $${session?.cost.total?.toFixed(6)}`);
+    console.log(`  usage: ${JSON.stringify(session?.usage)}`);
     console.log(`  hello.txt: ${JSON.stringify(content.slice(0, 80))}`);
     console.log(`  <think> leak: ${thinkLeak ? "YES (BUG)" : "no"}`);
 

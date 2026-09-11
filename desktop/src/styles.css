@@ -335,7 +335,8 @@ body.preview-hover .session-del { display: inline-flex; }
 .status-chip[data-status="failed"] .status-dot { background: var(--red); }
 
 .cost { font-size: 11.5px; font-family: var(--font-mono); color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
-.cost-cap { opacity: 0.55; }
+.tok { font-size: 11.5px; font-family: var(--font-mono); color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.tok-ctx { color: var(--text-muted); font-weight: 400; }.cost-cap { opacity: 0.55; }
 .cost[data-tight="true"] { color: var(--yellow); }
 
 .head-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: 4px; }

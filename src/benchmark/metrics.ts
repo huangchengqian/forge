@@ -12,7 +12,7 @@ export interface RunMetrics {
   failureReason: string | null;
   wallMs: number;
   turns: number;
-  cost: number;
+  tokens: number;
   vfail: number;
   vpass: number;
   verificationSequence: boolean[];
@@ -52,7 +52,7 @@ export function extractMetrics(input: {
     failureReason: session.failureReason,
     wallMs,
     turns: session.messages.length,
-    cost: session.cost.total,
+    tokens: session.usage.tokensIn + session.usage.tokensOut,
     vfail: verificationSequence.filter((p) => !p).length,
     vpass: verificationSequence.filter((p) => p).length,
     verificationSequence,
@@ -65,5 +65,5 @@ export function extractMetrics(input: {
 /** ROADMAP §7 style single-line report. */
 export function formatReportLine(name: string, category: string, goal: string, m: RunMetrics): string {
   const evalPart = m.evalScore === null ? "-" : String(m.evalScore);
-  return `  -> state=${m.state} wall=${m.wallMs}ms turns=${m.turns} cost=$${m.cost.toFixed(4)} vfail=${m.vfail} eval=${evalPart}${m.stuckPatterns.length > 0 ? ` stuck=${m.stuckPatterns.join(",")}` : ""} [${category}] ${goal} (${name})`;
+  return `  -> state=${m.state} wall=${m.wallMs}ms turns=${m.turns} tok=$${m.tokens} vfail=${m.vfail} eval=${evalPart}${m.stuckPatterns.length > 0 ? ` stuck=${m.stuckPatterns.join(",")}` : ""} [${category}] ${goal} (${name})`;
 }
