@@ -10,7 +10,9 @@ node_modules
 *~
 playground
 tmp
-dist
+# NOTE: anchored — a bare `dist` here matches at ANY depth and would ignore
+# the TRACKED pi/packages/*/dist build artifacts (see pi/.gitignore).
+/dist
 ts-dist
 .turbo
 # Forge: Pi runtime is vendored at pi/ (tracked in this repo, evolved directly).

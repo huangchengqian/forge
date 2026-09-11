@@ -33,6 +33,11 @@ echo "--- Repo Integrity ---"
 # .gitignore while AGENTS.md/README claimed it was vendored — external
 # reviewers saw a repo without Pi. This gate makes that impossible again.
 check "vendored pi integrity" "cd $ROOT && git ls-files --error-unmatch pi/packages/agent/package.json >/dev/null && git ls-files --error-unmatch pi/packages/ai/package.json >/dev/null && git ls-files --error-unmatch pi/packages/coding-agent/package.json >/dev/null"
+# Pi's dist/ must stay git-tracked: node_modules/@earendil-works/* symlink into
+# pi/packages/*, so a fresh clone (CI!) has no runtime without it. This gate
+# exists because pi/.gitignore once silently excluded dist/ and CI failed 14/26
+# while every local run was green — the same failure shape as the pi/ exclusion.
+check "pi dist integrity"     "cd $ROOT && git ls-files --error-unmatch pi/packages/agent/dist/index.js >/dev/null && git ls-files --error-unmatch pi/packages/ai/dist/index.js >/dev/null && git ls-files --error-unmatch pi/packages/coding-agent/dist/index.js >/dev/null"
 
 echo ""
 echo "--- Unit Tests ---"

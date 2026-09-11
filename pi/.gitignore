@@ -1,11 +1,17 @@
 node_modules/
-dist/
+# Root-level dist only. NOTE: a bare `dist/` here would also match
+# packages/*/dist/ at any depth — those are TRACKED in this repo.
+/dist/
 .artifacts/
 *.log
 .DS_Store
 *.tsbuildinfo
 # packages/*/node_modules/
-packages/*/dist/
+# packages/*/dist/ is TRACKED in this repo: node_modules/@earendil-works/*
+# symlink into packages/*, so a fresh clone needs dist to run — and CI has no
+# build step for Pi. Keep dist rebuilt when you edit packages/* source
+# (AGENTS.md §3); the release-check "pi dist integrity" gate fails when it
+# falls out of git again.
 packages/*/dist-chrome/
 packages/*/dist-firefox/
 packages/ai/src/providers/data/
