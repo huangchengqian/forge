@@ -187,8 +187,10 @@ body {
   padding: 0 10px 10px; box-sizing: border-box;
   background: var(--bg-sidebar);
 }
-/* Title-bar drag row: the macOS traffic lights overlay this area. */
-.sidebar-drag { height: 34px; flex-shrink: 0; }
+/* Title-bar drag row: the macOS traffic lights overlay this area.
+   Sized for trafficLightPosition (20, 24) in tauri.conf.json — the brand
+   must start clearly BELOW the lights, not beside them. */
+.sidebar-drag { height: 48px; flex-shrink: 0; }
 .sidebar-brand {
   font-size: 13px; font-weight: 750; color: var(--text);
   letter-spacing: 0.02em; padding: 0 8px 6px; opacity: 0.9;
