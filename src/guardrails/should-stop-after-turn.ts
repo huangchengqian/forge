@@ -8,6 +8,8 @@ import { appendEvent } from "../core/persistence/event-log.ts";
 import type { GuardrailConfig } from "./types.ts";
 
 const MAX_RECOVERY = 3;
+/** Rule 5.3: consecutive text-only turns before a task session is declared stuck. */
+const MONOLOGUE_TURNS = 4;
 
 function steer(text: string): AgentMessage {
   return {
@@ -38,6 +40,10 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
   const evaluator = new DeterministicEvaluator();
   let turnCount = 0;
   const recoveryCounts = new Map<string, number>();
+  // Rule 5.3 monologue guard: consecutive turns that produced no tool call.
+  // Conversation sessions are exempt — they legitimately talk (product
+  // decision: conversation = non-executing agent).
+  let monologueTurns = 0;
   const verificationRound: { round: number; lastPassed: boolean | null } = { round: 0, lastPassed: null };
 
   const recordVerification = async (passed: boolean, reason?: string): Promise<void> => {
@@ -92,6 +98,20 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
       stopReason === "stop" &&
       (!Array.isArray(content) || content.length === 0 || (content as unknown[]).every((b) => !b));
 
+    if (isEmpty) {
+      // Rule 5.5: an empty stop is an error in disguise — recover it like one
+      // instead of ending the run with a blank transcript.
+      const count = (recoveryCounts.get("empty") ?? 0) + 1;
+      recoveryCounts.set("empty", count);
+      if (count <= MAX_RECOVERY) {
+        config.steeringQueue.push(steer("Your response was empty. Try again."));
+        return false;
+      }
+      config.session.failureReason = "empty response after retries";
+      await recordVerification(false, "empty response after retries");
+      return true;
+    }
+
     // --- 2. Hard stoppers ---
     if (config.costGuard.isExhausted()) {
       // Abandonment must be visible: a budget-killed run is not "completed".
@@ -106,7 +126,27 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
     }
 
     // --- 3. Model still working → keep going ---
-    if (stopReason === "toolUse") return false;
+    if (stopReason === "toolUse") {
+      monologueTurns = 0;
+      return false;
+    }
+
+    // --- 3.5 Monologue guard (Rule 5.3) ---
+    // The model keeps producing text-only turns without touching a tool.
+    // For a task session this is a stuck pattern — steered retries of
+    // verification failures tend to degrade into exactly this — so it
+    // terminates with an honest failureReason (same shape as afterToolCall's
+    // stuck termination). Conversation sessions are exempt: talking IS the
+    // product there.
+    if (config.session.kind !== "conversation") {
+      monologueTurns++;
+      if (monologueTurns >= MONOLOGUE_TURNS) {
+        const reason = `stuck detected: monologue (${monologueTurns} consecutive turns without tool calls)`;
+        config.session.failureReason = reason;
+        await recordVerification(false, reason).catch(() => {});
+        return true;
+      }
+    }
 
     // --- 4. Model intends to stop → verification by trust level ---
     const { trustLevel, criteria } = config.completion;

@@ -96,7 +96,7 @@ Forge guardrails are Pi AgentLoopConfig callbacks, not an outer loop.
 
 Bad: Forge runs its own `while not done` loop around Pi.
 
-Good: Forge assembles `AgentLoopConfig` with `beforeToolCall` / `afterToolCall` / `shouldStopAfterTurn` and calls `agentLoop()`.
+Good: Forge assembles `AgentLoopConfig` with the six guardrail hooks — `beforeToolCall` / `afterToolCall` / `shouldStopAfterTurn` / `getSteeringMessages` (steering drain) / `transformContext` (context guard) / `prepareNextTurn` (compaction + mid-session switch drain) — and calls `agentLoop()`.
 
 ### Rule 4.2
 
@@ -160,11 +160,17 @@ A denied tool call is blocked. A destructive tool call terminates the session.
 
 Stuck detection prevents infinite loops.
 
-`afterToolCall` + `shouldStopAfterTurn` hooks detect:
+`afterToolCall` (via `StuckDetector`, over the tool-call history) detects:
 - repeated action-observation pairs (4 times)
 - repeated action-error pairs (4 times)
-- agent monologue without tool calls (4 times)
 - alternating pattern A→B→A→B (6 times)
+
+`shouldStopAfterTurn` detects:
+- agent monologue without tool calls (4 consecutive turns) — task sessions
+  only; conversation sessions are exempt because talking IS the product there
+
+All four terminate the session with an honest `failureReason`
+(`stuck detected: ...`), never a silent "completed".
 
 ### Rule 5.4
 
@@ -186,13 +192,19 @@ This is the error withholding pattern: recovery succeeds = user never sees the e
 
 ### Rule 5.6
 
-Cache stability is maintained (参考 Claude Code).
+Context is bounded, not cache-engineered (2026-09-11: honest scope statement —
+the Claude-Code-style prompt-cache strategy below was aspirational and is NOT
+implemented; do not re-add it to this document until it ships).
 
-`transformContext` considers prompt cache:
-- Tool array sorted by name (stable cache key)
-- System prompt split into cache segments (org/global/none scope)
-- Sticky latch: dynamic params once set are kept
-- Non-Anthropic providers skip cache strategy
+`transformContext` is a coarse last-resort guard: character-derived token
+estimate with a blunt LastN truncation past the soft window. Primary context
+management is Pi's compaction via `prepareNextTurn` (real per-turn usage data).
+Mid-session model/thinking switches drain in `prepareNextTurn` BEFORE the
+compaction threshold early-return, so switching works regardless of context size.
+
+Prompt-cache stability (tool-array sorting, system-prompt cache segments,
+sticky latches, provider-specific cache strategies) is future work and lives
+in Pi's protocol adapters when it happens — not in Forge hooks.
 
 ---
 
@@ -459,11 +471,11 @@ Prefer:
 
 ## Branch discipline
 
-`main` is always releasable.
+`master` is always releasable (default branch since 2026-09-08; the old `main` is frozen).
 
 Work on a short-lived branch (`feat/...`, `fix/...`) when the change crosses layers or touches the hook contract.
 
-Small, obviously-green changes go directly to `main`.
+Small, obviously-green changes go directly to `master`.
 
 ---
 
