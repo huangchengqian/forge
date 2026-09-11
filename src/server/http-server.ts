@@ -6,7 +6,9 @@ import { ProjectsRegistry } from "./projects.ts";
 import { SessionManager } from "./session-manager.ts";
 import { computeDiff, restoreUndo } from "./undo.ts";
 import { isAuthorized, newToken, writeHandshake } from "./auth.ts";
-import { loadForgeConfig, saveForgeConfig } from "./config-store.ts";
+import { loadForgeConfig, saveForgeConfig, PROVIDER_APIS } from "./config-store.ts";
+import type { ProviderApi } from "./config-store.ts";
+import { discoverModels } from "./model-discovery.ts";
 import { modelThinkingLevels } from "./model-resolver.ts";
 import type { ThinkingLevel } from "../types.ts";
 
@@ -265,6 +267,26 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
         const body = await readBody(req);
         await saveForgeConfig(opts.forgeHome, body as unknown as Parameters<typeof saveForgeConfig>[1]);
         json(res, 200, await loadForgeConfig(opts.forgeHome));
+        return;
+      }
+
+      // --- Model discovery (Settings: ask the endpoint what it serves) ---
+      if (req.method === "POST" && url.pathname === "/providers/models") {
+        const body = await readBody(req);
+        const api = body.api as ProviderApi | undefined;
+        const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl : "";
+        const apiKey = typeof body.apiKey === "string" ? body.apiKey : "";
+        if (!api || !PROVIDER_APIS.includes(api) || !baseUrl || !apiKey) {
+          json(res, 400, { error: "api, baseUrl and apiKey are required" });
+          return;
+        }
+        try {
+          json(res, 200, { models: await discoverModels({ api, baseUrl, apiKey }) });
+        } catch (err) {
+          // Upstream endpoint failure is not a Forge bug — 502 carries the
+          // reason so the Settings page can show something actionable.
+          json(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        }
         return;
       }
 

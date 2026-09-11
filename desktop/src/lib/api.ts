@@ -5,6 +5,7 @@ import type {
   ApprovalRecordView,
   ForgeConfigData,
   ProjectRecord,
+  ProviderApi,
   Session,
   ThinkingLevel,
 } from "../types.ts";
@@ -150,6 +151,19 @@ export async function fetchConfig(): Promise<ForgeConfigData> {
 
 export async function saveConfig(config: ForgeConfigData): Promise<ForgeConfigData> {
   return send("/config", "PUT", config);
+}
+
+/**
+ * Ask a subscription's endpoint which models it serves. The endpoint triple
+ * is posted as-is (works for unsaved edits); the key is used server-side for
+ * the upstream call only and never persisted or echoed back.
+ */
+export async function discoverModels(input: {
+  api: ProviderApi;
+  baseUrl: string;
+  apiKey: string;
+}): Promise<{ models: string[] }> {
+  return send("/providers/models", "POST", input);
 }
 
 // --- projects ---

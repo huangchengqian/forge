@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, saveConfig } from "../lib/api.ts";
+import { discoverModels, fetchConfig, saveConfig } from "../lib/api.ts";
 import type { ForgeConfigData, ProviderApi } from "../types.ts";
 
 const PROTOCOLS: ProviderApi[] = ["anthropic-messages", "openai-completions", "openai-responses"];
@@ -8,6 +8,11 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<ForgeConfigData | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Model discovery: fetched list per provider (unsaved edits work — the
+  // endpoint triple is posted as-is), plus which fetch is in flight.
+  const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({});
+  const [discovering, setDiscovering] = useState<string | null>(null);
+  const [discoverError, setDiscoverError] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void fetchConfig().then(setConfig).catch((e) => setError(String(e)));
@@ -24,6 +29,22 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
       ...config,
       providers: config.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)),
     });
+  };
+
+  const discover = async (p: ForgeConfigData["providers"][number]) => {
+    setDiscovering(p.id);
+    setDiscoverError((m) => ({ ...m, [p.id]: "" }));
+    try {
+      const { models } = await discoverModels({ api: p.api, baseUrl: p.baseUrl, apiKey: p.apiKey });
+      setFetchedModels((m) => ({ ...m, [p.id]: models }));
+      if (models.length === 0) {
+        setDiscoverError((m) => ({ ...m, [p.id]: "Endpoint answered with an empty model list." }));
+      }
+    } catch (e) {
+      setDiscoverError((m) => ({ ...m, [p.id]: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setDiscovering(null);
+    }
   };
 
   const save = async () => {
@@ -114,12 +135,50 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
                 </select>
 
                 <span className="field-label">model</span>
-                <input
-                  className="input"
-                  value={p.modelId}
-                  placeholder="e.g. MiniMax-M2.7"
-                  onChange={(e) => updateProvider(p.id, { modelId: e.target.value })}
-                />
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    className="input"
+                    style={{ flex: 1, minWidth: 0 }}
+                    value={p.modelId}
+                    placeholder="e.g. MiniMax-M2.7"
+                    onChange={(e) => updateProvider(p.id, { modelId: e.target.value })}
+                  />
+                  <button
+                    className="btn btn-quiet btn-small"
+                    onClick={() => void discover(p)}
+                    disabled={discovering !== null || !p.baseUrl.trim() || !p.apiKey.trim()}
+                    title="Ask this endpoint which models it serves"
+                  >
+                    {discovering === p.id ? "…" : "Fetch models"}
+                  </button>
+                </div>
+                {discoverError[p.id] && (
+                  <>
+                    <span className="field-label" />
+                    <span className="modal-error">{discoverError[p.id]}</span>
+                  </>
+                )}
+                {(fetchedModels[p.id]?.length ?? 0) > 0 && (
+                  <>
+                    <span className="field-label">fetched</span>
+                    <select
+                      className="input"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) updateProvider(p.id, { modelId: e.target.value });
+                      }}
+                    >
+                      <option value="">
+                        {fetchedModels[p.id]!.length} models served — pick one
+                      </option>
+                      {fetchedModels[p.id]!.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
 
                 <span className="field-label">baseUrl</span>
                 <input

@@ -91,6 +91,15 @@ async function main(): Promise<void> {
     });
     ok = ok && badSel.status === 404;
 
+    // 2d. Model discovery route exists: missing fields → 400 (route-presence
+    // regression — a 404 here would mean the route silently fell off).
+    const noFields = await fetch(`${base}/providers/models`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    ok = ok && noFields.status === 400;
+
     // 3. Create a session (202) — the agent fails fast against :9 and is aborted.
     const created = (await (
       await fetch(`${base}/sessions`, {
