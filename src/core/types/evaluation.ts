@@ -14,7 +14,7 @@ export type Evidence = {
 };
 
 export type EvaluationResult = {
-  taskId: string;
+  sessionId: string;
   score: number;
   status: EvaluationStatus;
   findings: readonly Finding[];

@@ -89,7 +89,7 @@ test("control-plane events fan out to the injected bus", async () => {
     const received = bus.events[0]!;
     assert.equal(received.type, "SESSION_CREATED");
     assert.equal(received.id, ev.id);
-    assert.equal(received.taskId, "task1");
+    assert.equal(received.sessionId, "task1");
     assert.deepEqual(received.payload, { goal: "x" });
   } finally {
     cleanup();

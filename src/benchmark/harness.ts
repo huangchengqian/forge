@@ -28,7 +28,6 @@ export interface GoldenTask {
   goal: string;
   trustLevel: TrustLevel;
   criteria: SuccessCriterion[];
-  maxTurns: number;
   /** Script factory — tools need the real (temp) workspace for absolute paths. */
   script: (workspace: string) => Script;
   /** Assertions run against the finished run. Throw-free: return pass/fail list. */
@@ -84,7 +83,6 @@ export async function runGoldenTask(task: GoldenTask): Promise<TaskReport> {
       thinkingLevel: "off",
       completionCriteria: task.criteria,
       lastEvaluation: null,
-      maxTurns: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -102,7 +100,6 @@ export async function runGoldenTask(task: GoldenTask): Promise<TaskReport> {
         trustLevel: task.trustLevel,
         criteria: task.criteria,
         
-        maxTurns: task.maxTurns,
       },
       approval: { request: async () => true },
       steeringQueue,

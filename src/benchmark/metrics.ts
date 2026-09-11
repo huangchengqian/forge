@@ -46,7 +46,7 @@ export function extractMetrics(input: {
   return {
     // Terminal state derived from the session's own records (direct
     // runAgent calls never go through SessionManager.settle): a failure
-    // reason means the run was killed (stuck guard / maxTurns / budget /
+    // reason means the run was killed (stuck guard / provider-side limits /
     // error); anything else that returned normally verified out as done.
     state: session.failureReason !== null ? "failed" : "completed",
     failureReason: session.failureReason,

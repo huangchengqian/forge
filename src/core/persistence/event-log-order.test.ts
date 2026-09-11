@@ -13,7 +13,7 @@ describe("event log append ordering", () => {
     // the desktop consume as ordered truth (CJK delta reordering bug).
     const dir = await mkdtemp(join(tmpdir(), "forge-events-"));
     process.env.FORGE_EVENTS_DIR = dir;
-    const taskId = "order-test";
+    const sessionId = "order-test";
 
     const payloads = Array.from({ length: 120 }, (_, i) => ({
       piEvent: {
@@ -24,14 +24,14 @@ describe("event log append ordering", () => {
 
     // Fire-and-forget, exactly like task-manager's onPiEvent.
     for (const [i, payload] of payloads.entries()) {
-      void appendEvent(taskId, "TEXT_DELTA", payload);
+      void appendEvent(sessionId, "TEXT_DELTA", payload);
       if (i % 20 === 19) await new Promise((r) => setTimeout(r, 0));
     }
 
     // Wait for the queue to drain.
-    await appendEvent(taskId, "SESSION_ENDED", {});
+    await appendEvent(sessionId, "SESSION_ENDED", {});
 
-    const events = await readEvents(taskId);
+    const events = await readEvents(sessionId);
     const deltas = events.filter((e) => e.type === "TEXT_DELTA");
     assert.equal(deltas.length, 120);
 
@@ -48,10 +48,10 @@ describe("event log append ordering", () => {
   test("awaited append resolves after its own line is durable", async () => {
     const dir = await mkdtemp(join(tmpdir(), "forge-events-"));
     process.env.FORGE_EVENTS_DIR = dir;
-    const taskId = "await-test";
+    const sessionId = "await-test";
 
-    const event = await appendEvent(taskId, "SESSION_CREATED", { goal: "g" });
-    const events = await readEvents(taskId);
+    const event = await appendEvent(sessionId, "SESSION_CREATED", { goal: "g" });
+    const events = await readEvents(sessionId);
     assert.equal(events.length, 1);
     assert.equal(events[0]?.id, event.id);
     assert.equal(events[0]?.type, "SESSION_CREATED");

@@ -27,16 +27,17 @@ function steer(text: string): AgentMessage {
  *    truncated / empty / API-error turns get steering retries (max 3 each)
  *    before anything is surfaced — a transient provider hiccup must never
  *    kill a long-running session.
- * 2. Hard stopper: maxTurns reached. (Cost budget retired 2026-09-11 —
- *    spend limits belong to the provider; the client-side estimator was
- *    blind for custom endpoints.)
+ * 2. (Retired hard stoppers.) The cost budget went on 2026-09-11 and the
+ *    turn budget on 2026-09-12 — neither had a UI entry, so neither ever
+ *    fired for a user. What bounds a run today: the stuck guard above, the
+ *    model's own completion, and the user's Stop button.
  * 3. Model still working (stopReason === "toolUse") → never stop. Running
  *    verification mid-work would both corrupt the run and burn budget.
  * 4. Model intends to stop → completion verification by trust level:
  *    low = accept, medium = criteria/project checks, high = all criteria +
  *    deterministic evaluator. Verification failure injects steering
  *    ("Verification failed. Please fix.") and returns false — the loop
- *    continues; abandonment is decided by maxTurns/maxCost/stuck, explicitly.
+ *    continues; abandonment is decided by the stuck guard, explicitly.
  */
 export function makeShouldStopAfterTurn(config: GuardrailConfig) {
   const evaluator = new DeterministicEvaluator();
@@ -114,16 +115,7 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
       return true;
     }
 
-    // --- 2. Hard stoppers ---
-    // (Cost budget was removed 2026-09-11: client-side price estimation was
-    // blind for custom endpoints and no UI path ever set a budget. Spend
-    // limits belong to the provider; turn bounds are maxTurns below.)
-    if (config.completion.maxTurns !== null && turnCount >= config.completion.maxTurns) {
-      config.session.failureReason ??= "max turns reached";
-      await recordVerification(false, "max turns reached").catch(() => {});
-      return true;
-    }
-
+    // --- 2. (no hard stoppers remain — see the header) ---
     // --- 3. Model still working → keep going ---
     if (stopReason === "toolUse") {
       monologueTurns = 0;
@@ -158,14 +150,9 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
       let allPassed = true;
       let failureReasons: string[] = [];
 
-      const checks =
-        criteria.length > 0
-          ? criteria
-          : trustLevel === "medium"
-            ? // No explicit criteria: fall back to the project check when a
-              // package.json exists (npm test is on the command allowlist).
-              []
-            : [];
+      // Explicit criteria when they exist; the medium fallback below covers
+      // the "no criteria" case with the project check (npm test).
+      const checks = criteria;
 
       for (const criterion of checks) {
         const result = await validate(criterion, config.workspace);
@@ -199,7 +186,7 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
             `Verification failed: ${failureReasons.join("; ")}. Fix the issue and try to complete the task again.`,
           ),
         );
-        return false; // loop continues; abandonment is maxTurns/maxCost/stuck
+        return false; // loop continues; abandonment is the stuck guard's call
       }
 
       if (trustLevel === "high") {

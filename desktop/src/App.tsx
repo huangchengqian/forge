@@ -35,13 +35,17 @@ export function App() {
         token: localStorage.getItem("forge-token") ?? "",
       },
     );
-    void refreshSessions();
-    // Open the most recent session by default — zero-config startup.
-    void store.getState().refreshSessions().then(() => {
-      const latest = store.getState().sessions[0];
-      if (latest) store.getState().select(latest.id);
-    });
-  }, [refreshSessions]);
+    // One fetch, then open the most recent session by default — zero-config
+    // startup. (This used to call refreshSessions() twice: once bare, once
+    // chained, racing two identical requests.)
+    void store
+      .getState()
+      .refreshSessions()
+      .then(() => {
+        const latest = store.getState().sessions[0];
+        if (latest) store.getState().select(latest.id);
+      });
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -74,6 +78,7 @@ export function App() {
             status={activeSession.status}
             failureReason={activeSession.failureReason}
             modelId={activeSession.model?.modelId ?? ""}
+            providerId={activeSession.model?.provider ?? ""}
             trustLevel={activeSession.trustLevel}
             thinkingLevel={activeSession.thinkingLevel}
           />

@@ -43,7 +43,6 @@ export interface DesktopState {
     trustLevel: TrustLevel;
     thinkingLevel?: ThinkingLevel;
     criteria?: Array<{ kind: string; [k: string]: unknown }>;
-    maxTurns?: number;
   }) => Promise<void>;
   steer: (message: string) => Promise<void>;
   abort: () => Promise<void>;
@@ -60,6 +59,7 @@ const emptyConversation = (): ConversationView => ({
   timeline: [],
   verification: [],
   usage: { tokensIn: 0, tokensOut: 0, contextTokens: null },
+  providerId: null,
   modelId: null,
   trustLevel: null,
   thinkingLevel: null,
@@ -329,6 +329,7 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
 
     case "MODEL_CHANGED": {
       conversation.modelId = String(payload.modelId ?? "");
+      if (typeof payload.providerId === "string") conversation.providerId = payload.providerId;
       conversation.timeline = upsert(conversation.timeline, {
         kind: "notice",
         id: `model-${stamp}`,
@@ -378,11 +379,6 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
     }
 
     case "STEERING_QUEUED": {
-      // kind=guard_approval_request → pull the pending dialog.
-      if (payload.kind === "guard_approval_request") {
-        void pollApprovals();
-        return {};
-      }
       // A user steering message: echo it into the timeline immediately.
       // Before this, a steered message existed only in a server-side queue —
       // while the loop was busy (e.g. a long tool call) the text simply
@@ -396,6 +392,15 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
         pending: true,
       });
       return { conversation };
+    }
+
+    // The server's own approval-request event (session-manager emits this type;
+    // it never packs the request into STEERING_QUEUED — that branch was dead).
+    // Pulling here means the dialog shows as soon as the guard asks, instead
+    // of waiting for the next 2.5s poll tick.
+    case "GUARD_APPROVAL_REQUEST": {
+      void pollApprovals();
+      return {};
     }
 
     // The server emits exactly these two terminal types (session-manager.ts):
@@ -436,8 +441,9 @@ function maybeNotifyOutcome(env: EventEnvelope): void {
   if (typeof document === "undefined" || !document.hidden) return;
   const state = store.getState();
   // The stream is opened per session, so the active id is the fallback when a
-  // frame carries no taskId (e.g. a raw log replay).
-  const id = String(env.taskId ?? state.activeSessionId ?? "");
+  // frame carries no session id (e.g. a raw log replay). `taskId` is the
+  // pre-rename name found in older log lines.
+  const id = String(env.sessionId ?? env.taskId ?? state.activeSessionId ?? "");
   const goal = state.sessions.find((s) => s.id === id)?.goal ?? "";
   if (!goal.trim()) return;
   notifyTaskOutcome(goal, outcomeFromTerminal(env.type, env.payload?.status));

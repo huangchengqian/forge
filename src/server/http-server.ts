@@ -73,7 +73,6 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
           ...(body.trustLevel ? { trustLevel: body.trustLevel } : {}),
           ...(body.thinkingLevel ? { thinkingLevel: body.thinkingLevel } : {}),
           ...(Array.isArray(body.criteria) ? { criteria: body.criteria } : {}),
-          ...(typeof body.maxTurns === "number" ? { maxTurns: body.maxTurns } : {}),
         });
         json(res, 202, result);
         return;

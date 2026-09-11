@@ -8,10 +8,20 @@ import type { UsageTracker } from "./usage-tracker.ts";
  * dependency.
  */
 export interface ApprovalRelay {
-  /** Resolves when the user approves (true) or denies/expires/aborts (false). */
+  /**
+   * Resolves when the user approves (true) or denies/expires/aborts (false).
+   *
+   * `sessionId` is REQUIRED: the desktop finds pending requests with
+   * listPending(sessionId), so a request filed without one is invisible —
+   * no dialog, and the hook sits out the full timeout. This interface used
+   * to omit the field while the hub required it; the hook (which types
+   * against this interface) silently passed nothing, and the resulting
+   * 5-minute waits read as "the agent froze on a bash command".
+   */
   request(
     input: {
       requestId: string;
+      sessionId: string;
       toolName: string;
       input: Record<string, unknown>;
       timeoutMs?: number;

@@ -38,8 +38,6 @@ export interface Session {
   thinkingLevel: ThinkingLevel;
   completionCriteria: SuccessCriterion[];
   lastEvaluation: EvaluationResult | null;
-  /** Turn budget; null = unbounded. Persisted since schema v5 (survives resume). */
-  maxTurns: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -57,5 +55,4 @@ export interface SessionUsage {
 export interface CompletionConfig {
   trustLevel: TrustLevel;
   criteria: SuccessCriterion[];
-  maxTurns: number | null;
 }

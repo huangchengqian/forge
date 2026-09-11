@@ -12,31 +12,41 @@
  * event log directly and do NOT consume the bus.
  */
 
-export type ControlEventType =
+/**
+ * The one and only control-plane list. `ControlEventType` is derived from it,
+ * and `event-log.ts` builds its lookup set from the same array — a new event
+ * type is added HERE, once. (Previously this list and the set in event-log.ts
+ * were two hand-copied 15-item lists glued by a cast; adding a type to one
+ * side silently drifted from the other.)
+ */
+export const CONTROL_EVENT_TYPES = [
   // lifecycle
-  | "SESSION_CREATED"
-  | "SESSION_STARTED"
-  | "SESSION_RESUMED"
-  | "SESSION_ENDED"
-  | "SESSION_FAILED"
-  | "SESSION_CANCELLED"
+  "SESSION_CREATED",
+  "SESSION_STARTED",
+  "SESSION_RESUMED",
+  "SESSION_ENDED",
+  "SESSION_FAILED",
+  "SESSION_CANCELLED",
   // guardrails
-  | "STEERING_QUEUED"
-  | "VERIFICATION_RESULT"
-  | "USAGE_UPDATE"
-  | "COST_UPDATE"
-  | "STUCK_WARNING"
-  | "GUARD_BLOCKED"
-  | "GUARD_APPROVAL_REQUEST"
-  | "EVALUATION_COMPLETED"
+  "STEERING_QUEUED",
+  "VERIFICATION_RESULT",
+  "USAGE_UPDATE",
+  "COST_UPDATE",
+  "STUCK_WARNING",
+  "GUARD_BLOCKED",
+  "GUARD_APPROVAL_REQUEST",
+  "EVALUATION_COMPLETED",
   // compaction
-  | "COMPACTION"
-  | "COMPACTION_FAILED";
+  "COMPACTION",
+  "COMPACTION_FAILED",
+] as const;
+
+export type ControlEventType = (typeof CONTROL_EVENT_TYPES)[number];
 
 export type ControlEvent = {
   id: string;
   type: ControlEventType;
-  taskId: string;
+  sessionId: string;
   at: number;
   payload: Record<string, unknown>;
 };

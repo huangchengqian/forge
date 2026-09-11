@@ -37,7 +37,6 @@ async function main(): Promise<void> {
         "repeated 60 times, one sentence per line. Then stop.",
       projectId: project.id,
       trustLevel: "low",
-      maxTurns: 10,
     });
 
     // Wait for settle.

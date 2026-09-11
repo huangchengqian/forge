@@ -98,7 +98,6 @@ async function main(): Promise<void> {
     thinkingLevel: "off",
     completionCriteria: [],
     lastEvaluation: null,
-    maxTurns: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -109,7 +108,7 @@ async function main(): Promise<void> {
     workspace,
     undoRoot: join(workspace, ".forge-undo"),
     session,
-    completion: { trustLevel: "medium", criteria: [],  maxTurns: null },
+    completion: { trustLevel: "medium", criteria: []},
     // Simulated user: denies every approval.
     approval: {
       request: async () => {

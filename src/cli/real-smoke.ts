@@ -54,7 +54,6 @@ async function main(): Promise<void> {
       projectId: project.id,
       trustLevel: "medium",
       criteria: [{ kind: "file_contains", path: "hello.txt", pattern: "hello from minimax" }],
-      maxTurns: 10,
     });
     console.log(`  session: ${sessionId} workspace: ${workspace}`);
 

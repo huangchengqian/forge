@@ -100,6 +100,7 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
       const approved = await raceWithAbort(
         config.approval.request({
           requestId,
+          sessionId: config.sessionId,
           toolName,
           input,
           timeoutMs: APPROVAL_TIMEOUT_MS,

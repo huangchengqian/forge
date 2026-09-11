@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { store } from "../lib/store.ts";
-import { fetchConfig } from "../lib/api.ts";
+import { useModelCatalog } from "../lib/catalog.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 import type { ProviderConfig, ThinkingLevel, TimelineEntry, TrustLevel } from "../types.ts";
@@ -52,11 +52,19 @@ function Notice({ entry }: { entry: Extract<TimelineEntry, { kind: "notice" }> }
   );
 }
 
-/** Criteria pass/fail feed — the VerificationPanel. */
+/**
+ * Criteria feed — shown ONLY when verification failed.
+ *
+ * A green "PASS round 1" after every single run is noise (PM, 2026-09-12):
+ * it repeats what "completed" already says. The actionable case is a failure
+ * — that is when the user needs to see which round failed and why the agent
+ * is being steered back.
+ */
 function VerificationPanel() {
   const verification = store((s) => s.conversation.verification);
   if (verification.length === 0) return null;
   const last = verification[verification.length - 1]!;
+  if (verification.every((v) => v.passed)) return null;
   return (
     <section className="verify" data-state={last.passed ? "pass" : "fail"}>
       <div className="verify-head">
@@ -135,6 +143,7 @@ export function SessionView({
   status,
   failureReason,
   modelId,
+  providerId,
   trustLevel,
   thinkingLevel,
 }: {
@@ -143,6 +152,8 @@ export function SessionView({
   status: string;
   failureReason: string | null;
   modelId: string;
+  /** Session.model.provider — the picker's key (authoritative namespace). */
+  providerId: string;
   trustLevel: TrustLevel;
   thinkingLevel: ThinkingLevel;
 }) {
@@ -155,40 +166,32 @@ export function SessionView({
   const [steerInput, setSteerInput] = useState("");
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resumeMessage, setResumeMessage] = useState("");
-  const [providers, setProviders] = useState<ProviderConfig[]>([]);
-  /** Thinking levels each subscription's model supports, per the server. */
-  const [capabilities, setCapabilities] = useState<Record<string, ThinkingLevel[]>>({});
-  /** Context window per subscription's model (server-derived from Pi's catalog). */
-  const [contextWindows, setContextWindows] = useState<Record<string, number>>({});
+  const { providers, capabilities, contextWindows } = useModelCatalog();
   const running = status === "running";
   const resumable = status === "failed" || status === "cancelled";
   const canFollowUp = status === "completed";
   // MODEL_CHANGED events override the session's original model in the UI.
   const effectiveModelId = conversation.modelId ?? modelId;
+  // The picker is keyed by PROVIDER id, and Session.model.provider is the
+  // server's authority for it. Looking the provider up by modelId (the old
+  // code) silently picked the first subscription whenever two share a model,
+  // highlighting the wrong row and reading the wrong model's capabilities.
+  const effectiveProviderId = conversation.providerId ?? providerId;
   // TRUST_CHANGED events do the same for the verification level.
   const effectiveTrust: TrustLevel = conversation.trustLevel ?? trustLevel;
   // THINKING_CHANGED events do the same for the reasoning effort.
   const effectiveThinking: ThinkingLevel = conversation.thinkingLevel ?? thinkingLevel;
-  // Provider id behind the effective model (the picker is keyed by provider).
-  const activeProviderId =
-    providers.find((p) => p.modelId === effectiveModelId)?.id ?? null;
   // Levels the running model actually supports (server-derived).
-  const thinkingLevels = (activeProviderId ? capabilities[activeProviderId] : undefined) ?? ["off"];
+  const thinkingLevels =
+    (effectiveProviderId ? capabilities[effectiveProviderId] : undefined) ?? ["off"];
+  // Context window of the running model, for the token meter.
+  const contextWindow =
+    effectiveProviderId !== null ? (contextWindows[effectiveProviderId] ?? null) : null;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const pinnedRef = useRef(true);
   const endRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    void fetchConfig()
-      .then((cfg) => {
-        setProviders(cfg.providers);
-        setCapabilities(cfg.modelCapabilities ?? {});
-        setContextWindows(cfg.modelContextWindows ?? {});
-      })
-      .catch(() => {});
-  }, []);
 
   // Grow the composer with the content instead of reserving fixed rows.
   useEffect(() => {
@@ -213,8 +216,10 @@ export function SessionView({
     pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
   };
 
-  const onModelSwitch = async (providerId: string) => {
-    if (!providerId || providerId === effectiveModelId) return;
+  const onModelSwitch = async (nextProviderId: string) => {
+    // Both sides are provider ids now. This used to compare the incoming
+    // provider id against the MODEL id — a guard that never matched.
+    if (!nextProviderId || nextProviderId === effectiveProviderId) return;
     try {
       const { switchModel } = await import("../lib/api.ts");
       await switchModel(sessionId, providerId);
@@ -279,7 +284,7 @@ export function SessionView({
       <header className="session-head">
         <div className="session-head-inner">
           <h1 className="session-goal" title={goal}>{goal}</h1>
-          <TokenMeter usage={conversation.usage} contextWindow={activeProviderId ? (contextWindows[activeProviderId] ?? null) : null} />
+          <TokenMeter usage={conversation.usage} contextWindow={contextWindow} />
           <div className="head-actions">
             {resumable && (
               <button
@@ -413,7 +418,7 @@ export function SessionView({
               <div className="composer-meta">
                 <ModelPicker
                   providers={providers}
-                  activeProviderId={activeProviderId}
+                  activeProviderId={effectiveProviderId ?? null}
                   activeModelLabel={effectiveModelId || undefined}
                   onSelectModel={(id) => void onModelSwitch(id)}
                   trustLevel={effectiveTrust}

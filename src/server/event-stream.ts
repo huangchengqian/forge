@@ -28,11 +28,11 @@ export class TaskEventStream {
 
   constructor(
     private readonly eventsDir: string,
-    private readonly taskId: string,
+    private readonly sessionId: string,
   ) {}
 
   private filePath(): string {
-    return join(this.eventsDir, `${this.taskId}.events.jsonl`);
+    return join(this.eventsDir, `${this.sessionId}.events.jsonl`);
   }
 
   stop(): void {

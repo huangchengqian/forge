@@ -36,7 +36,6 @@ function makeSession(kind: Session["kind"]): Session {
     thinkingLevel: "off",
     completionCriteria: [],
     lastEvaluation: null,
-    maxTurns: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -56,7 +55,7 @@ function makeConfig(
     workspace: session.workspace,
     undoRoot: join(TMP, "undo"),
     session,
-    completion: { trustLevel, criteria,  maxTurns: null },
+    completion: { trustLevel, criteria},
     approval: { request: async () => true },
     steeringQueue: {
       push: (m: AgentMessage) => {

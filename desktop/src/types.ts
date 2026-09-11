@@ -20,15 +20,24 @@ export interface Session {
   model: { provider: string; modelId: string };
   status: SessionStatus;
   failureReason: string | null;
-  cost: { total: number; budget: number | null };
+  usage: SessionUsage;
   trustLevel: TrustLevel;
   thinkingLevel: ThinkingLevel;
-  maxTurns: number | null;
   createdAt: number;
   updatedAt: number;
 }
 
-export type ProviderApi = "anthropic-messages" | "openai-completions" | "openai-responses";
+/** Mirror of the server's SessionUsage (token counters + context watermark). */
+export interface SessionUsage {
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+  lastContextTokens: number | null;
+}
+
+import type { ProviderApi } from "./lib/protocols.ts";
+export type { ProviderApi };
 
 export interface ProviderConfig {
   id: string;
@@ -67,6 +76,8 @@ export interface EventEnvelope {
   seq?: string;
   type: string;
   /** Session the event belongs to (present on persisted frames and log lines). */
+  sessionId?: string;
+  /** Legacy field name on log lines written before the 2026-09-12 rename. */
   taskId?: string;
   payload: {
     type?: string;
@@ -141,6 +152,8 @@ export interface ConversationView {
   usage: { tokensIn: number; tokensOut: number; contextTokens: number | null };
   /** Updated by MODEL_CHANGED events (mid-session model switch). */
   modelId: string | null;
+  /** Provider id behind the effective model (authoritative picker key). */
+  providerId: string | null;
   /** Updated by TRUST_CHANGED events (mid-session verification switch). */
   trustLevel: TrustLevel | null;
   /** Updated by THINKING_CHANGED events (mid-session reasoning switch). */

@@ -45,7 +45,7 @@ export class DeterministicEvaluator {
     const status = hasCritical ? "REVIEW_REQUIRED" : findings.length > 0 ? "WARNING" : "PASS";
 
     return {
-      taskId: session.id,
+      sessionId: session.id,
       score,
       status,
       findings,

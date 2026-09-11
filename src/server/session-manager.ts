@@ -97,7 +97,6 @@ export class SessionManager {
     trustLevel?: TrustLevel | undefined;
     thinkingLevel?: ThinkingLevel | undefined;
     criteria?: SuccessCriterion[] | undefined;
-    maxTurns?: number | undefined;
     kind?: "conversation" | "task" | undefined;
   }): Promise<{ sessionId: string }> {
     // 1. Resolve the subscription (explicit providerId or the default one).
@@ -137,7 +136,6 @@ export class SessionManager {
       thinkingLevel,
       completionCriteria: input.criteria ?? [],
       lastEvaluation: null,
-      maxTurns: input.maxTurns ?? null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -153,7 +151,6 @@ export class SessionManager {
       {
         trustLevel,
         criteria: input.criteria ?? [],
-        maxTurns: input.maxTurns ?? null,
       },
     );
 
@@ -259,7 +256,6 @@ export class SessionManager {
       trustLevel: session.trustLevel,
       criteria: session.completionCriteria,
       // Turn budget is persisted since schema v5 and survives resume.
-      maxTurns: session.maxTurns,
     };
     await this.launchAgent(
       session,

@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { discoverModels, fetchConfig, saveConfig } from "../lib/api.ts";
+import { PROVIDER_PROTOCOLS } from "../lib/protocols.ts";
 import type { ForgeConfigData, ProviderApi } from "../types.ts";
-
-const PROTOCOLS: ProviderApi[] = ["anthropic-messages", "openai-completions", "openai-responses"];
 
 export function SettingsPage({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<ForgeConfigData | null>(null);
@@ -127,7 +126,7 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
                   value={p.api}
                   onChange={(e) => updateProvider(p.id, { api: e.target.value as ProviderApi })}
                 >
-                  {PROTOCOLS.map((api) => (
+                  {PROVIDER_PROTOCOLS.map((api) => (
                     <option key={api} value={api}>
                       {api}
                     </option>

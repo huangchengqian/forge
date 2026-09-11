@@ -186,8 +186,10 @@ and no UI path ever set a budget, so the breaker never fired).
 
 `UsageTracker` accumulates per-session token counters and keeps the context
 watermark (`lastContextTokens`); `prepareNextTurn` reads the watermark to
-trigger compaction. Spend limits belong to the provider; turn bounds are
-`maxTurns`.
+trigger compaction. Spend limits belong to the provider. There is no
+client-side budget of any kind (the turn budget was retired 2026-09-12 — like
+the cost budget, it had no UI entry and therefore never fired): what bounds a
+run is the stuck guard, the model's own completion, and the user's Stop.
 
 ### Rule 5.5
 
@@ -329,7 +331,7 @@ Every guardrail must have a UI entry point.
 | Guardrail | UI component |
 |---|---|
 | Guard ask (approval) | ApprovalDialog (real-time popup) |
-| Completion verification | VerificationPanel (per-run criteria + pass/fail + evidence) |
+| Completion verification | VerificationPanel (appears on verification FAILURE; a passing run shows nothing) |
 | Usage & context | header token meter (↑in ↓out · ctx watermark) |
 | Stuck detection | In-place notice in the transcript |
 | Steering | Mid-run input box |

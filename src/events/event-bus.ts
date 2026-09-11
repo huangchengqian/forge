@@ -34,7 +34,7 @@ export class EventBus {
 
 /**
  * Process-wide default for `appendEvent` fan-out. Tests can inject a
- * different bus per-call via `appendEvent(taskId, type, payload, { bus })`
+ * different bus per-call via `appendEvent(sessionId, type, payload, { bus })`
  * to observe/control fan-out without polluting the global bus.
  */
 export const defaultBus = new EventBus();

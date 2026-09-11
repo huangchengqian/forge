@@ -10,9 +10,10 @@ import type { ProviderConfig } from "./config-store.ts";
 
 /**
  * Look up a model in Pi's built-in catalog by id (protocol as a tiebreaker
- * when several providers ship the same model id). Returns real pricing,
- * context window, and reasoning flag — without this, UsageTracker sees zero
- * cost on every real provider and the budget guard is decorative.
+ * when several providers ship the same model id). Returns the context
+ * window and reasoning flag the UI derives its capability lists from — a
+ * model missing from the catalog loses its context-window denominator in
+ * the token meter and its thinking-level options in the picker.
  */
 function lookupBuiltinModel(modelId: string, api?: string): Model<any> | null {
   for (const provider of getProviders()) {
@@ -41,7 +42,7 @@ export function buildModel(subscription: ProviderConfig): Model<any> {
   const catalog = lookupBuiltinModel(subscription.modelId, subscription.api);
   if (!catalog) {
     console.warn(
-      `[forge] model "${subscription.modelId}" not in Pi catalog — cost guard will see $0 (pricing unknown)`,
+      `[forge] model "${subscription.modelId}" not in Pi catalog — token accounting is unaffected, pricing is unknown`,
     );
   }
   // Start from the catalog entry when there is one, then override the

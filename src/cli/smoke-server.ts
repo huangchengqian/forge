@@ -112,10 +112,16 @@ async function main(): Promise<void> {
     console.log(`  session created: ${sessionId}`);
     ok = ok && typeof sessionId === "string";
 
-    // 4. Session readable.
-    const session = (await (await fetch(`${base}/sessions/${sessionId}`, { headers: auth })).json()) as { status: string; goal: string };
+    // 4. Session readable — including the usage record the token meter reads
+    //    (a field the server drops would make that meter a lie in the UI).
+    const session = (await (await fetch(`${base}/sessions/${sessionId}`, { headers: auth })).json()) as {
+      status: string;
+      goal: string;
+      usage: unknown;
+    };
     console.log(`  session status: ${session.status}, goal: ${session.goal}`);
     ok = ok && session.goal === "smoke session";
+    ok = ok && typeof session.usage === "object";
 
     // 5. SSE stream yields at least the created/started events.
     const controller = new AbortController();

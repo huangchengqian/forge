@@ -12,7 +12,7 @@ export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
 
 export type ApprovalRecord = {
   requestId: string;
-  taskId: string;
+  sessionId: string;
   method: string;
   title: string;
   message: string;
@@ -24,19 +24,19 @@ type Waiter = (approved: boolean) => void;
 
 export class ApprovalHub {
   private readonly records = new Map<string, ApprovalRecord>();
-  private readonly byTask = new Map<string, Set<string>>();
+  private readonly bySession = new Map<string, Set<string>>();
   private readonly waiters = new Map<string, Waiter>();
 
-  record(input: { requestId: string; taskId: string; method: string; title: string; message: string; at: number }): void {
+  record(input: { requestId: string; sessionId: string; method: string; title: string; message: string; at: number }): void {
     this.records.set(input.requestId, { ...input, status: "pending" });
-    const set = this.byTask.get(input.taskId) ?? new Set<string>();
+    const set = this.bySession.get(input.sessionId) ?? new Set<string>();
     set.add(input.requestId);
-    this.byTask.set(input.taskId, set);
+    this.bySession.set(input.sessionId, set);
   }
 
   /** Pending approvals for a task (oldest first). */
-  listPending(taskId: string): readonly ApprovalRecord[] {
-    const ids = this.byTask.get(taskId);
+  listPending(sessionId: string): readonly ApprovalRecord[] {
+    const ids = this.bySession.get(sessionId);
     if (!ids) return [];
     return [...ids]
       .map((id) => this.records.get(id))
@@ -70,7 +70,7 @@ export class ApprovalHub {
   request(
     input: {
       requestId: string;
-      taskId: string;
+      sessionId: string;
       toolName: string;
       input: Record<string, unknown>;
       timeoutMs?: number;
@@ -80,7 +80,7 @@ export class ApprovalHub {
     const timeoutMs = input.timeoutMs ?? 5 * 60_000;
     this.record({
       requestId: input.requestId,
-      taskId: input.taskId,
+      sessionId: input.sessionId,
       method: "tool_call",
       title: `Allow ${input.toolName}?`,
       message: JSON.stringify(input.input).slice(0, 500),

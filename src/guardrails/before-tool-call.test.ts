@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { makeBeforeToolCall } from "./before-tool-call.ts";
 import { UsageTracker } from "./usage-tracker.ts";
+import { ApprovalHub } from "../server/approval-hub.ts";
 import type { GuardrailConfig } from "./types.ts";
 import type { Session } from "../types.ts";
 
@@ -40,7 +41,6 @@ function stubSession(workspace: string): Session {
     thinkingLevel: "off",
     completionCriteria: [],
     lastEvaluation: null,
-    maxTurns: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -52,7 +52,7 @@ function config(undoRoot: string): GuardrailConfig {
     workspace: WS,
     undoRoot,
     session: stubSession(WS),
-    completion: { trustLevel: "medium", criteria: [],  maxTurns: null },
+    completion: { trustLevel: "medium", criteria: []},
     approval: { request: async () => true },
     steeringQueue: [],
     usage: new UsageTracker(),
@@ -108,6 +108,55 @@ describe("beforeToolCall → undo journal wiring", () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0]!.action, "created");
     assert.equal(entries[0]!.backup, null);
+  });
+});
+
+describe("beforeToolCall → approval key alignment", () => {
+  test("an ask is discoverable by sessionId (the dialog's only lookup key)", async () => {
+    // Regression for the real-world freeze: the hook called approval.request()
+    // without a sessionId, so the hub filed the request under `undefined`
+    // while the desktop asked for it by session id — no dialog ever appeared
+    // and the hook sat out the full 5-minute timeout (twice, as the model
+    // retried) before reporting the command as blocked.
+    const hub = new ApprovalHub();
+    const cfg: GuardrailConfig = {
+      ...config(join(TMP, "undo-approval-key")),
+      sessionId: "session_key_1",
+      approval: hub,
+    };
+    const hook = makeBeforeToolCall(cfg);
+
+    const pendingCall = hook({
+      toolCall: { name: "bash", id: "call-key-1" },
+      args: { command: "ls -la /tmp/x" },
+    } as never);
+    await new Promise((r) => setTimeout(r, 30));
+
+    const pending = hub.listPending("session_key_1");
+    assert.equal(pending.length, 1, "the desktop can find the request by session id");
+    assert.equal(pending[0]!.title, "Allow bash?");
+
+    // Approving through the same request id releases the hook.
+    hub.mark("call-key-1", "approved");
+    assert.equal(await pendingCall, undefined, "approved → the tool runs");
+  });
+
+  test("a denied ask blocks the tool", async () => {
+    const hub = new ApprovalHub();
+    const cfg: GuardrailConfig = {
+      ...config(join(TMP, "undo-approval-deny")),
+      sessionId: "session_key_2",
+      approval: hub,
+    };
+    const hook = makeBeforeToolCall(cfg);
+    const pendingCall = hook({
+      toolCall: { name: "bash", id: "call-key-2" },
+      args: { command: "rm -rf /tmp/x" },
+    } as never);
+    await new Promise((r) => setTimeout(r, 30));
+    hub.mark("call-key-2", "denied");
+    const result = await pendingCall;
+    assert.ok(result && result.block === true, "denied → blocked");
   });
 });
 

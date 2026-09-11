@@ -60,14 +60,21 @@ export class UsageTracker {
     };
   }
 
-  /** Resume from persisted session state (session.usage). */
-  hydrate(state: Partial<{
-    tokensIn: number;
-    tokensOut: number;
-    cacheRead: number;
-    cacheWrite: number;
-    lastContextTokens: number | null;
-  }>): void {
+  /**
+   * Resume from persisted session state (session.usage). Tolerates an absent
+   * record: schema migrations fill it in, but a crash-on-resume is never an
+   * acceptable answer to a missing optional counter.
+   */
+  hydrate(state:
+    | Partial<{
+        tokensIn: number;
+        tokensOut: number;
+        cacheRead: number;
+        cacheWrite: number;
+        lastContextTokens: number | null;
+      }>
+    | undefined): void {
+    if (!state) return;
     if (typeof state.tokensIn === "number") this.tokensIn = state.tokensIn;
     if (typeof state.tokensOut === "number") this.tokensOut = state.tokensOut;
     if (typeof state.cacheRead === "number") this.cacheRead = state.cacheRead;

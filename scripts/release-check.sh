@@ -45,6 +45,7 @@ check "verification tests"    "cd $ROOT && node --import tsx --test src/verifica
 check "command policy tests"  "cd $ROOT && node --import tsx --test src/verification/command-policy.test.ts"
 check "schema tests"          "cd $ROOT && node --import tsx --test src/core/persistence/schema.test.ts"
 check "event-log order tests" "cd $ROOT && node --import tsx --test src/core/persistence/event-log-order.test.ts"
+check "event-log compat tests" "cd $ROOT && node --import tsx --test src/core/persistence/event-log-compat.test.ts"
 check "event-log fanout test" "cd $ROOT && node --import tsx --test src/core/persistence/event-log-fanout.test.ts"
 check "replay tests"          "cd $ROOT && node --import tsx --test src/core/persistence/replay.test.ts"
 check "guard policy tests"    "cd $ROOT && node --import tsx --test src/guard/policy.test.ts"
@@ -55,6 +56,7 @@ check "config-store tests"   "cd $ROOT && node --import tsx --test src/server/co
 check "model discovery tests" "cd $ROOT && node --import tsx --test src/server/model-discovery.test.ts"
 check "stuck-detector tests" "cd $ROOT && node --import tsx --test src/guardrails/stuck-detector.test.ts"
 check "usage tracker tests"     "cd $ROOT && node --import tsx --test src/guardrails/usage-tracker.test.ts"
+check "protocol consistency"   "cd $ROOT && node --import tsx --test tests/protocol-consistency.test.ts"
 check "compaction tests"     "cd $ROOT && node --import tsx --test src/guardrails/compaction.test.ts"
 
 echo ""

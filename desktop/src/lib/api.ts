@@ -57,7 +57,6 @@ export async function createSession(input: {
   trustLevel: "low" | "medium" | "high";
   thinkingLevel?: ThinkingLevel;
   criteria?: Array<{ kind: string; [k: string]: unknown }>;
-  maxTurns?: number;
 }): Promise<{ sessionId: string }> {
   return send("/sessions", "POST", input);
 }

@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { EventBus } from "../../events/event-bus.ts";
 import { defaultBus } from "../../events/event-bus.ts";
+import { CONTROL_EVENT_TYPES } from "../../events/event-types.ts";
 import type { ControlEvent, ControlEventType } from "../../events/event-types.ts";
 
 export function eventsDir(): string {
@@ -59,7 +60,7 @@ export type PersistedEventType =
   | "GUARD_BLOCKED"
   | "GUARD_APPROVAL_REQUEST"
   // Phase 3: trust-level-high evaluator round. Payload shape:
-  //   EVALUATION_COMPLETED     → EvaluationResult ({ taskId, score, status, findings, evidence })
+  //   EVALUATION_COMPLETED     → EvaluationResult ({ sessionId, score, status, findings, evidence })
   | "EVALUATION_COMPLETED"
   // Phase 5: compaction
   | "COMPACTION"
@@ -68,10 +69,36 @@ export type PersistedEventType =
 export type PersistedEvent = {
   id: string;
   type: PersistedEventType;
-  taskId: string;
+  /**
+   * Session this event belongs to. Renamed from `taskId` (2026-09-12) — the
+   * domain model has been Session for a long time; the field name was the
+   * last holdout. Logs written before the rename carry `taskId`; readEvents
+   * normalizes them (see normalizeEvent) so consumers see one name.
+   */
+  sessionId: string;
   at: number;
   payload: Record<string, unknown>;
 };
+
+/**
+ * Old log lines (pre-rename) use `taskId` for the same value. Normalize at
+ * the read boundary so nothing downstream has to know about the legacy name.
+ */
+function normalizeEvent(raw: Record<string, unknown>): PersistedEvent {
+  const sessionId =
+    typeof raw.sessionId === "string"
+      ? raw.sessionId
+      : typeof raw.taskId === "string"
+        ? raw.taskId
+        : "";
+  return {
+    id: typeof raw.id === "string" ? raw.id : "",
+    type: raw.type as PersistedEventType,
+    sessionId,
+    at: typeof raw.at === "number" ? raw.at : 0,
+    payload: (raw.payload ?? {}) as Record<string, unknown>,
+  };
+}
 
 /**
  * Control-plane subset of PersistedEventType. These are the events that
@@ -79,31 +106,19 @@ export type PersistedEvent = {
  * Data-plane events (TURN, MESSAGE, TEXT_DELTA, TOOL families) stay in the
  * log only — high volume, not actionable as notifications.
  */
-const CONTROL_EVENT_TYPES: ReadonlySet<PersistedEventType> = new Set<PersistedEventType>([
-  "SESSION_CREATED",
-  "SESSION_STARTED",
-  "SESSION_RESUMED",
-  "SESSION_ENDED",
-  "SESSION_FAILED",
-  "SESSION_CANCELLED",
-  "STEERING_QUEUED",
-  "VERIFICATION_RESULT",
-  "USAGE_UPDATE",
-  "COST_UPDATE",
-  "STUCK_WARNING",
-  "GUARD_BLOCKED",
-  "GUARD_APPROVAL_REQUEST",
-  "EVALUATION_COMPLETED",
-  "COMPACTION",
-  "COMPACTION_FAILED",
-]);
+// Derived from the single source of truth in events/event-types.ts. The
+// Set<PersistedEventType> annotation is the compile-time guard: a control
+// event that is not a PersistedEventType fails to build here.
+const CONTROL_EVENT_SET: ReadonlySet<PersistedEventType> = new Set<PersistedEventType>(
+  CONTROL_EVENT_TYPES,
+);
 
 export function isControlEvent(type: PersistedEventType): type is ControlEventType {
-  return CONTROL_EVENT_TYPES.has(type);
+  return CONTROL_EVENT_SET.has(type);
 }
 
-function eventFile(taskId: string): string {
-  return join(eventsDir(), `${taskId}.events.jsonl`);
+function eventFile(sessionId: string): string {
+  return join(eventsDir(), `${sessionId}.events.jsonl`);
 }
 
 /**
@@ -131,25 +146,25 @@ const appendQueues = new Map<string, Promise<unknown>>();
  * append result or the FIFO chain.
  */
 export function appendEvent(
-  taskId: string,
+  sessionId: string,
   type: PersistedEventType,
   payload: Record<string, unknown>,
   opts?: { bus?: EventBus },
 ): Promise<PersistedEvent> {
   const bus = opts?.bus ?? defaultBus;
-  const prev = appendQueues.get(taskId) ?? Promise.resolve();
-  const run = prev.then(() => appendEventNow(taskId, type, payload, bus));
+  const prev = appendQueues.get(sessionId) ?? Promise.resolve();
+  const run = prev.then(() => appendEventNow(sessionId, type, payload, bus));
   // Keep the chain alive (and the map bounded) even if an append fails.
   const queued = run.catch(() => {});
-  appendQueues.set(taskId, queued);
+  appendQueues.set(sessionId, queued);
   void queued.finally(() => {
-    if (appendQueues.get(taskId) === queued) appendQueues.delete(taskId);
+    if (appendQueues.get(sessionId) === queued) appendQueues.delete(sessionId);
   });
   return run;
 }
 
 async function appendEventNow(
-  taskId: string,
+  sessionId: string,
   type: PersistedEventType,
   payload: Record<string, unknown>,
   bus: EventBus,
@@ -158,11 +173,11 @@ async function appendEventNow(
   const event: PersistedEvent = {
     id: randomUUID(),
     type,
-    taskId,
+    sessionId,
     at: Date.now(),
     payload,
   };
-  await appendFile(eventFile(taskId), JSON.stringify(event) + "\n", "utf8");
+  await appendFile(eventFile(sessionId), JSON.stringify(event) + "\n", "utf8");
 
   // Fan out to the control-plane bus (data-plane events stop at the log).
   // Bus publish errors are caught inside EventBus.publish — they cannot
@@ -174,11 +189,11 @@ async function appendEventNow(
   return event;
 }
 
-export async function readEvents(taskId: string): Promise<readonly PersistedEvent[]> {
+export async function readEvents(sessionId: string): Promise<readonly PersistedEvent[]> {
   try {
-    const text = await readFile(eventFile(taskId), "utf8");
+    const text = await readFile(eventFile(sessionId), "utf8");
     const lines = text.split("\n").filter((l) => l.trim().length > 0);
-    return lines.map((l) => JSON.parse(l) as PersistedEvent);
+    return lines.map((l) => normalizeEvent(JSON.parse(l) as Record<string, unknown>));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;

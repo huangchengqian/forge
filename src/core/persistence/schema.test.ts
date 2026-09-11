@@ -40,6 +40,38 @@ describe("session schema migration", () => {
     }
   });
 
+  test("a v6 session (cost, no usage) migrates to token counters", () => {
+    // The real-world failure: existing sessions carried `cost` and no `usage`,
+    // so resume() handed `undefined` to UsageTracker.hydrate and every
+    // pre-existing session died with "reading 'tokensIn'".
+    const v6 = {
+      schemaVersion: 6,
+      id: "session_old",
+      goal: "g",
+      cost: { total: 0.42, budget: 5 },
+      thinkingLevel: "off",
+    };
+    const out = migrateSession(v6);
+    assert.equal(out.schemaVersion, SESSION_SCHEMA_VERSION);
+    assert.equal("cost" in out, false, "the dollar record is dropped, not carried");
+    assert.deepEqual(out.usage, {
+      tokensIn: 0,
+      tokensOut: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      lastContextTokens: null,
+    });
+  });
+
+  test("a current-version session missing `usage` is still normalized", () => {
+    // Version stamp === current is NOT proof the fields are there (a write
+    // from an older build already carrying the stamp used to short-circuit
+    // the whole migration pass).
+    const out = migrateSession({ schemaVersion: SESSION_SCHEMA_VERSION, id: "s1", goal: "g" });
+    assert.ok(out.usage, "usage is filled in even without a migration step");
+    assert.equal((out.usage as { tokensIn: number }).tokensIn, 0);
+  });
+
   test("stamping writes the current version", () => {
     const stamped = stampSchemaVersion({ id: "s1" });
     assert.equal(stamped.schemaVersion, SESSION_SCHEMA_VERSION);

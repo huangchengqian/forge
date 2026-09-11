@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { store } from "../lib/store.ts";
-import { fetchConfig } from "../lib/api.ts";
+import { useModelCatalog } from "../lib/catalog.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
-import type { ProviderConfig, ThinkingLevel, TrustLevel } from "../types.ts";
+import type { ThinkingLevel, TrustLevel } from "../types.ts";
 
 /** Parse the compact criteria syntax: "file_exists:hello.txt" or
  * "file_contains:hello.txt:export" (kind:path[:pattern]). Empty → none. */
@@ -17,13 +17,6 @@ function parseCriteria(input: string): Array<{ kind: string; [k: string]: unknow
   return [];
 }
 
-const SUGGESTIONS = [
-  "Create hello.ts exporting a hello() function",
-  "Write unit tests for the existing code",
-  "Refactor the messiest file in this repo",
-  "Explain what this project does",
-];
-
 export function Composer({ projectId }: { projectId?: string | null }) {
   const createSession = store((s) => s.createSession);
   const loading = store((s) => s.loading);
@@ -32,19 +25,19 @@ export function Composer({ projectId }: { projectId?: string | null }) {
   const [trust, setTrust] = useState<TrustLevel>("medium");
   const [thinking, setThinking] = useState<ThinkingLevel>("medium");
   const [criteriaLine, setCriteriaLine] = useState("");
-  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  // Turn budget: after the cost budget was retired this is the only "runaway"
+  // bound, and it used to have no UI entry at all (AGENTS.md Rule 9.2: a
+  // capability without a UI entry point does not exist for the user).
+  const { providers, defaultProviderId, capabilities } = useModelCatalog();
   const [providerId, setProviderId] = useState<string | null>(null);
-  /** Thinking levels each subscription's model supports, per the server. */
-  const [capabilities, setCapabilities] = useState<Record<string, ThinkingLevel[]>>({});
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Default the picker to the configured default subscription once the
+  // catalog arrives (and keep a manual choice if the user already made one).
   useEffect(() => {
-    void fetchConfig().then((cfg) => {
-      setProviders(cfg.providers);
-      setProviderId(cfg.defaultProviderId || cfg.providers[0]?.id || null);
-      setCapabilities(cfg.modelCapabilities ?? {});
-    }).catch(() => {});
-  }, []);
+    if (providerId !== null || providers.length === 0) return;
+    setProviderId(defaultProviderId || providers[0]?.id || null);
+  }, [providers, defaultProviderId, providerId]);
 
   // Until the server tells us otherwise, assume no reasoning support — the
   // picker then says so instead of offering levels that would do nothing.
@@ -76,11 +69,6 @@ export function Composer({ projectId }: { projectId?: string | null }) {
     <div className="landing-wrap">
       <div className="landing">
         <h1 className="landing-title">What should Forge do?</h1>
-        <p className="landing-sub">
-          The agent reads, writes and runs commands in your project. Completion is
-          verified before it is called done.
-        </p>
-
         <div className="composer-box">
           <textarea
             ref={taRef}
@@ -128,20 +116,6 @@ export function Composer({ projectId }: { projectId?: string | null }) {
 
         {error && <div className="landing-error">{error}</div>}
 
-        <div className="landing-suggestions">
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              className="suggestion-chip"
-              onClick={() => {
-                setGoal(s);
-                taRef.current?.focus();
-              }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );

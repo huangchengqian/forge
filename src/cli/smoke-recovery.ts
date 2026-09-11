@@ -109,7 +109,6 @@ async function main(): Promise<void> {
       thinkingLevel: "off",
       completionCriteria: [],
       lastEvaluation: null,
-      maxTurns: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

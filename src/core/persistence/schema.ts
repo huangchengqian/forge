@@ -1,4 +1,4 @@
-export const SESSION_SCHEMA_VERSION = 6;
+export const SESSION_SCHEMA_VERSION = 7;
 
 type Migration = {
   from: number;
@@ -33,7 +33,9 @@ function mapTaskStateToSessionStatus(state: unknown): SessionStatusLike {
 type SessionStatusLike = "running" | "completed" | "failed" | "cancelled";
 
 /**
- * v4 → v5: persist `maxTurns`.
+ * v4 → v5: persist `maxTurns`. (The field was retired 2026-09-12 — it had no
+ * UI entry, so it never fired for a user. This step stays: the chain must
+ * still carry v4 files to the current shape.)
  *
  * The turn budget was previously only carried in the in-memory
  * CompletionConfig — a resumed session lost it and ran unbounded by turns.
@@ -58,6 +60,30 @@ function addMaxTurns(raw: Record<string, unknown>): Record<string, unknown> {
 function addThinkingLevel(raw: Record<string, unknown>): Record<string, unknown> {
   return { ...raw, thinkingLevel: "off" };
 }
+
+/**
+ * v6 → v7: `cost` (dollars, never enforced) → `usage` (token counters).
+ *
+ * The dollar layer was removed (2026-09-11); per-session usage is now the
+ * persisted record, hydrating UsageTracker on resume. Old sessions carry
+ * `cost`, which cannot be converted into tokens — the honest migration is
+ * zeroed counters (their real token history was never recorded) plus the
+ * cost key dropped. Without this, resume() passed `undefined` into
+ * UsageTracker.hydrate and every pre-existing session failed with
+ * "Cannot read properties of undefined (reading 'tokensIn')".
+ */
+function costToUsage(raw: Record<string, unknown>): Record<string, unknown> {
+  const { cost: _droppedCost, ...rest } = raw;
+  return { ...rest, usage: { ...DEFAULT_USAGE } };
+}
+
+const DEFAULT_USAGE = {
+  tokensIn: 0,
+  tokensOut: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  lastContextTokens: null,
+} as const;
 
 const MIGRATIONS: readonly Migration[] = [
   {
@@ -89,6 +115,11 @@ const MIGRATIONS: readonly Migration[] = [
     from: 5,
     to: 6,
     migrate: (raw) => addThinkingLevel(raw),
+  },
+  {
+    from: 6,
+    to: 7,
+    migrate: (raw) => costToUsage(raw),
   },
 ];
 
@@ -140,9 +171,6 @@ export function stampSchemaVersion(session: Record<string, unknown>): Record<str
 export function migrateSession(raw: Record<string, unknown>): Record<string, unknown> {
   const version = typeof raw.schemaVersion === "number" ? raw.schemaVersion : 0;
 
-  // Already current.
-  if (version === SESSION_SCHEMA_VERSION) return { ...raw };
-
   let data = { ...raw };
   let current = version;
   for (const migration of MIGRATIONS) {
@@ -152,5 +180,23 @@ export function migrateSession(raw: Record<string, unknown>): Record<string, unk
     }
   }
 
-  return { ...data, schemaVersion: SESSION_SCHEMA_VERSION };
+  // Field completeness is NOT the same as the version stamp. This used to
+  // short-circuit when `version === SESSION_SCHEMA_VERSION` and return the
+  // raw object — so a file at the current version but missing a field (a
+  // write from an older build that had already bumped the stamp, a hand-edited
+  // file) sailed through and crashed its consumer. Always ensure the fields
+  // the current schema promises exist.
+  return { ...ensureCurrentFields(data), schemaVersion: SESSION_SCHEMA_VERSION };
+}
+
+/** Fill in fields a current-version session must have, without a migration. */
+function ensureCurrentFields(data: Record<string, unknown>): Record<string, unknown> {
+  const usage =
+    data.usage && typeof data.usage === "object"
+      ? (data.usage as Record<string, unknown>)
+      : {};
+  return {
+    ...data,
+    usage: { ...DEFAULT_USAGE, ...usage },
+  };
 }

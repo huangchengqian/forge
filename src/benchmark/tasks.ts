@@ -28,7 +28,6 @@ export const goldenCreateFile: GoldenTask = {
   goal: "Create hello.txt saying hello",
   trustLevel: "medium",
   criteria: [{ kind: "file_contains", path: "hello.txt", pattern: "hello" }],
-  maxTurns: 8,
   script: createFileScript,
   assert: ({ session, metrics, workspace, runtime }) => {
     const a: Assertion[] = [];
@@ -62,7 +61,6 @@ export const goldenVerifyFail: GoldenTask = {
   goal: "Create util.ts with an export (model forgets, verification catches)",
   trustLevel: "high",
   criteria: [{ kind: "file_contains", path: "util.ts", pattern: "export" }],
-  maxTurns: 12,
   script: verifyFailScript,
   assert: ({ session, metrics, workspace, runtime }) => {
     const a: Assertion[] = [];
@@ -108,7 +106,6 @@ export const goldenStuckLoop: GoldenTask = {
   goal: "Agent repeats an identical write forever (stuck)",
   trustLevel: "medium",
   criteria: [],
-  maxTurns: 32,
   script: () => stuckScript(10),
   assert: ({ metrics, runtime, session }) => {
     const a: Assertion[] = [];
@@ -152,7 +149,6 @@ export const goldenMultiStep: GoldenTask = {
     { kind: "file_contains", path: "util.ts", pattern: "export function add" },
     { kind: "file_contains", path: "main.ts", pattern: "add" },
   ],
-  maxTurns: 10,
   script: multiStepScript,
   assert: ({ session, metrics, workspace, runtime }) => {
     const a: Assertion[] = [];
