@@ -112,6 +112,49 @@ export const DEFAULT_POLICY: GuardPolicy = {
   ],
 };
 
+/**
+ * Read-only bash commands whitelisted through in the "default" approval mode
+ * (PM, 2026-09-12: "默认（按白名单放行）").
+ *
+ * Conservative by construction: EVERY shell segment (split on &&, ||, ;, |,
+ * newline) must start with a read-only binary; redirection, command
+ * substitution and expansion disqualify the whole command; `find` may not
+ * carry -delete/-exec; `git` only in read-only subcommands. Anything
+ * uncertain asks — the whitelist must never be the reason something
+ * destructive ran.
+ */
+const SAFE_BASH_BINARIES: ReadonlySet<string> = new Set([
+  "ls", "cat", "head", "tail", "pwd", "echo", "which", "where", "type",
+  "find", "grep", "rg", "wc", "sort", "uniq", "diff", "stat", "file",
+  "du", "df", "date", "whoami", "id", "env", "printenv", "cd",
+  "true", "false",
+]);
+
+const SAFE_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "status", "diff", "log", "show", "branch", "remote", "rev-parse", "stash list",
+]);
+
+export function isSafeBash(command: unknown): boolean {
+  if (typeof command !== "string" || command.trim().length === 0) return false;
+  // Redirection writes files; substitution/expansion executes hidden code.
+  if (/[><`$]/.test(command)) return false;
+  const segments = command.split(/&&|\|\||;|\||\n/);
+  for (const raw of segments) {
+    const seg = raw.trim();
+    if (seg.length === 0) continue;
+    if (/\b(delete|exec)\b/.test(seg) && seg.startsWith("find")) return false;
+    const tokens = seg.split(/\s+/);
+    const bin = tokens[0] ?? "";
+    if (bin === "git") {
+      const sub = (tokens[1] ?? "") + (tokens[2] === "list" ? ` ${tokens[2]}` : "");
+      if (!SAFE_GIT_SUBCOMMANDS.has(sub)) return false;
+      continue;
+    }
+    if (!SAFE_BASH_BINARIES.has(bin)) return false;
+  }
+  return true;
+}
+
 export function defaultPolicy(): GuardPolicy {
   return structuredClone(DEFAULT_POLICY);
 }

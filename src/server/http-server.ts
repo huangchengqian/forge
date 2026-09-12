@@ -73,6 +73,9 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
           ...(body.trustLevel ? { trustLevel: body.trustLevel } : {}),
           ...(body.thinkingLevel ? { thinkingLevel: body.thinkingLevel } : {}),
           ...(Array.isArray(body.criteria) ? { criteria: body.criteria } : {}),
+          ...(body.approvalMode === "ask" || body.approvalMode === "default" || body.approvalMode === "always"
+            ? { approvalMode: body.approvalMode }
+            : {}),
         });
         json(res, 202, result);
         return;
@@ -168,6 +171,22 @@ export async function startForgeServer(opts: ForgeServerOptions): Promise<ForgeS
         }
         try {
           const result = await manager.switchThinking(parts[1]!, level);
+          json(res, 200, result);
+        } catch (err) {
+          json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "approval") {
+        const body = await readBody(req);
+        const mode = body.approvalMode;
+        if (mode !== "ask" && mode !== "default" && mode !== "always") {
+          json(res, 400, { error: "approvalMode must be ask | default | always" });
+          return;
+        }
+        try {
+          const result = await manager.switchApprovalMode(parts[1]!, mode);
           json(res, 200, result);
         } catch (err) {
           json(res, 409, { error: err instanceof Error ? err.message : String(err) });

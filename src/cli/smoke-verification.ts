@@ -81,7 +81,6 @@ async function main(): Promise<void> {
 
   const session: Session = {
     id: sessionId,
-    kind: "task",
     goal: "create hello.ts exporting a hello function",
     workspace,
     projectId: null,
@@ -90,6 +89,7 @@ async function main(): Promise<void> {
     status: "running",
     failureReason: null,
     usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
+    approvalMode: "default",
     trustLevel: "high",
     thinkingLevel: "off",
     completionCriteria: [{ kind: "file_contains", path: "hello.txt", pattern: "export" }],

@@ -9,7 +9,6 @@ describe("session schema migration", () => {
       id: "task_20260908_a1",
       goal: "create hello.txt",
       state: "COMPLETE",
-      kind: "task",
       directory: "/tmp/old",
       workspacePath: "/tmp/project",
       projectId: "p1",

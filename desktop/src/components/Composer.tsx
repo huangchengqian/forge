@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { store } from "../lib/store.ts";
 import { useModelCatalog } from "../lib/catalog.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
-import type { ThinkingLevel, TrustLevel } from "../types.ts";
+import type { ApprovalMode, ThinkingLevel, TrustLevel } from "../types.ts";
 
 /** Parse the compact criteria syntax: "file_exists:hello.txt" or
  * "file_contains:hello.txt:export" (kind:path[:pattern]). Empty → none. */
@@ -25,6 +25,7 @@ export function Composer({ projectId }: { projectId?: string | null }) {
   const [trust, setTrust] = useState<TrustLevel>("medium");
   const [thinking, setThinking] = useState<ThinkingLevel>("medium");
   const [criteriaLine, setCriteriaLine] = useState("");
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>("default");
   // Turn budget: after the cost budget was retired this is the only "runaway"
   // bound, and it used to have no UI entry at all (AGENTS.md Rule 9.2: a
   // capability without a UI entry point does not exist for the user).
@@ -59,6 +60,7 @@ export function Composer({ projectId }: { projectId?: string | null }) {
       ...(providerId ? { providerId } : {}),
       trustLevel: trust,
       thinkingLevel: thinking,
+      approvalMode,
       ...(trust === "high" ? { criteria: parseCriteria(criteriaLine) } : {}),
     });
     setGoal("");
@@ -96,6 +98,8 @@ export function Composer({ projectId }: { projectId?: string | null }) {
                 thinkingLevel={thinking}
                 thinkingLevels={thinkingLevels}
                 onSelectThinking={setThinking}
+                approvalMode={approvalMode}
+                onSelectApprovalMode={setApprovalMode}
                 placement="above"
               />
               {trust === "high" && (

@@ -20,10 +20,9 @@ import type { Session, TrustLevel } from "../types.ts";
 
 const TMP = mkdtempSync(join(tmpdir(), "forge-stop-gate-tests-"));
 
-function makeSession(kind: Session["kind"]): Session {
+function makeSession(): Session {
   return {
     id: "session-stop-gate-test",
-    kind,
     goal: "test",
     workspace: TMP,
     projectId: null,
@@ -32,6 +31,7 @@ function makeSession(kind: Session["kind"]): Session {
     status: "running",
     failureReason: null,
     usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
+    approvalMode: "default",
     trustLevel: "medium",
     thinkingLevel: "off",
     completionCriteria: [],
@@ -90,7 +90,7 @@ after(() => {
 
 describe("empty stop recovery (Rule 5.5)", () => {
   test("steers up to 3 times, then surfaces an honest failure", async () => {
-    const session = makeSession("task");
+    const session = makeSession();
     const { config, steered } = makeConfig(session);
     const gate = makeShouldStopAfterTurn(config);
     const emptyTurn = { message: { role: "assistant", stopReason: "stop", content: [] } };
@@ -105,7 +105,7 @@ describe("empty stop recovery (Rule 5.5)", () => {
   });
 
   test("a non-empty stop is not treated as empty", async () => {
-    const session = makeSession("task");
+    const session = makeSession();
     const { config } = makeConfig(session);
     const gate = makeShouldStopAfterTurn(config);
     // trustLevel low → a normal stop ends the run without steering.
@@ -120,7 +120,7 @@ describe("monologue guard (Rule 5.3)", () => {
   const neverPasses = [{ kind: "file_exists" as const, path: "no-such-file-ever.txt" }];
 
   test("4 consecutive text-only turns kill a task session", async () => {
-    const session = makeSession("task");
+    const session = makeSession();
     const { config } = makeConfig(session, "medium", neverPasses);
     const gate = makeShouldStopAfterTurn(config);
 
@@ -132,7 +132,7 @@ describe("monologue guard (Rule 5.3)", () => {
   });
 
   test("a toolUse turn resets the counter", async () => {
-    const session = makeSession("task");
+    const session = makeSession();
     const { config } = makeConfig(session, "medium", neverPasses);
     const gate = makeShouldStopAfterTurn(config);
     const toolTurn = {
@@ -147,14 +147,24 @@ describe("monologue guard (Rule 5.3)", () => {
     assert.equal(session.failureReason, null, "counter reset — only 2 consecutive");
   });
 
-  test("conversation sessions are exempt — they legitimately talk", async () => {
-    const session = makeSession("conversation");
+  test("no conversation exemption — 4 tool-less turns kill ANY session", async () => {
+    // PM, 2026-09-12: 不做分流，所有输入都进执行型 agent。旧的 conversation
+    // 豁免随之作废——闲聊 4 轮不出工具同样判定为 monologue 卡死。
+    const session = makeSession();
     const { config } = makeConfig(session, "medium", neverPasses);
     const gate = makeShouldStopAfterTurn(config);
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 3; i++) {
       assert.equal(await gate(stopTurn(`chat ${i}`) as never), false, `turn ${i + 1} keeps going`);
     }
-    assert.equal(session.failureReason, null);
+    assert.equal(
+      await gate(stopTurn("d") as never),
+      true,
+      "monologue kills on the 4th consecutive tool-less turn",
+    );
+    assert.equal(
+      session.failureReason,
+      "stuck detected: monologue (4 consecutive turns without tool calls)",
+    );
   });
 });

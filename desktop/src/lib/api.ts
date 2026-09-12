@@ -61,6 +61,13 @@ export async function createSession(input: {
   return send("/sessions", "POST", input);
 }
 
+export async function switchApprovalMode(
+  sessionId: string,
+  approvalMode: "ask" | "default" | "always",
+): Promise<{ approvalMode: "ask" | "default" | "always" }> {
+  return send(`/sessions/${sessionId}/approval`, "POST", { approvalMode });
+}
+
 export async function fetchSessions(): Promise<Session[]> {
   return (await getJson<{ sessions: Session[] }>("/sessions")).sessions;
 }

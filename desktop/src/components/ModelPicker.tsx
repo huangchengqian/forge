@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { ProviderConfig, ThinkingLevel, TrustLevel } from "../types.ts";
 import { TRUST_LEVELS, trustLabel } from "../lib/verification.ts";
 import { thinkingLabel, thinkingMeta } from "../lib/thinking.ts";
+import { APPROVAL_MODES, approvalLabel } from "../lib/approval.ts";
+import type { ApprovalMode } from "../types.ts";
 
 /** Small inline check — drawn rather than typed so it sits on the text
  * baseline instead of reading as a glyph. */
@@ -63,6 +65,8 @@ export function ModelPicker({
   thinkingLevel,
   thinkingLevels,
   onSelectThinking,
+  approvalMode,
+  onSelectApprovalMode,
   placement = "above",
   disabled = false,
   defaultOpen = false,
@@ -81,6 +85,8 @@ export function ModelPicker({
    * `modelCapabilities`. A model with no reasoning support yields ["off"]. */
   thinkingLevels: ThinkingLevel[];
   onSelectThinking: (level: ThinkingLevel) => void;
+  approvalMode: ApprovalMode;
+  onSelectApprovalMode: (mode: ApprovalMode) => void;
   /** Which way the panel opens. Composers sit at the bottom → "above". */
   placement?: "above" | "below";
   disabled?: boolean;
@@ -132,6 +138,8 @@ export function ModelPicker({
             <span className="picker-thinking">{thinkingLabel(thinkingLevel)}</span>
           </>
         )}
+        <span className="picker-dot" aria-hidden="true" />
+        <span className="picker-approval">{approvalLabel(approvalMode)}</span>
         <span className={`picker-caret${open ? " is-open" : ""}`}>
           <CaretIcon />
         </span>
@@ -229,6 +237,35 @@ export function ModelPicker({
                 );
               })
             )}
+          </div>
+
+          <div className="picker-rule" />
+
+          <div className="picker-group">
+            <div className="picker-group-label">审批</div>
+            {APPROVAL_MODES.map((mode) => {
+              const on = mode.value === approvalMode;
+              return (
+                <button
+                  key={mode.value}
+                  type="button"
+                  className="picker-option"
+                  data-active={on || undefined}
+                  role="option"
+                  aria-selected={on}
+                  onClick={() => {
+                    if (!on) onSelectApprovalMode(mode.value);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="picker-mark">{on && <CheckIcon />}</span>
+                  <span className="picker-option-body">
+                    <span className="picker-option-label">{mode.label}</span>
+                    <span className="picker-option-hint">{mode.hint}</span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

@@ -79,6 +79,7 @@ export function App() {
             failureReason={activeSession.failureReason}
             modelId={activeSession.model?.modelId ?? ""}
             providerId={activeSession.model?.provider ?? ""}
+            approvalMode={activeSession.approvalMode ?? "default"}
             trustLevel={activeSession.trustLevel}
             thinkingLevel={activeSession.thinkingLevel}
           />

@@ -96,7 +96,6 @@ async function main(): Promise<void> {
     const sessionId = `session_smoke_recovery_${Date.now()}`;
     const session: Session = {
       id: sessionId,
-      kind: "task",
       goal: "smoke recovery",
       workspace: forgeHome,
       projectId: null,
@@ -105,6 +104,7 @@ async function main(): Promise<void> {
       status: "failed",
       failureReason: "simulated failure",
       usage: { tokensIn: 123, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null }, // ← tokens to test hydrate
+      approvalMode: "default",
       trustLevel: "low",
       thinkingLevel: "off",
       completionCriteria: [],

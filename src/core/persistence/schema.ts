@@ -1,4 +1,4 @@
-export const SESSION_SCHEMA_VERSION = 7;
+export const SESSION_SCHEMA_VERSION = 8;
 
 type Migration = {
   from: number;
@@ -62,6 +62,18 @@ function addThinkingLevel(raw: Record<string, unknown>): Record<string, unknown>
 }
 
 /**
+ * v7 → v8: persist `approvalMode` (ask | default | always).
+ *
+ * The approval posture is a session-level run-config axis (PM, 2026-09-12:
+ * "没有审批级别，每次 bash 都要我批"). Old sessions migrate to "default" —
+ * safe read-only commands stop asking, which is the behavior the user asked
+ * for going forward.
+ */
+function addApprovalMode(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, approvalMode: "default" };
+}
+
+/**
  * v6 → v7: `cost` (dollars, never enforced) → `usage` (token counters).
  *
  * The dollar layer was removed (2026-09-11); per-session usage is now the
@@ -76,6 +88,8 @@ function costToUsage(raw: Record<string, unknown>): Record<string, unknown> {
   const { cost: _droppedCost, ...rest } = raw;
   return { ...rest, usage: { ...DEFAULT_USAGE } };
 }
+
+const APPROVAL_MODES: readonly string[] = ["ask", "default", "always"];
 
 const DEFAULT_USAGE = {
   tokensIn: 0,
@@ -121,6 +135,11 @@ const MIGRATIONS: readonly Migration[] = [
     to: 7,
     migrate: (raw) => costToUsage(raw),
   },
+  {
+    from: 7,
+    to: 8,
+    migrate: (raw) => addApprovalMode(raw),
+  },
 ];
 
 function migrateLegacyTaskToSession(raw: Record<string, unknown>): Record<string, unknown> {
@@ -146,6 +165,7 @@ function migrateLegacyTaskToSession(raw: Record<string, unknown>): Record<string
     status,
     failureReason: legacyFailure ?? (status === "cancelled" ? "migrated from legacy task state" : null),
     usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
+    approvalMode: "default",
     trustLevel: "medium",
     thinkingLevel: "off",
     completionCriteria: [],
@@ -198,5 +218,9 @@ function ensureCurrentFields(data: Record<string, unknown>): Record<string, unkn
   return {
     ...data,
     usage: { ...DEFAULT_USAGE, ...usage },
+    approvalMode:
+      typeof data.approvalMode === "string" && APPROVAL_MODES.includes(data.approvalMode)
+        ? data.approvalMode
+        : "default",
   };
 }

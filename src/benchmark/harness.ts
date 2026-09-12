@@ -70,7 +70,6 @@ export async function runGoldenTask(task: GoldenTask): Promise<TaskReport> {
     const sessionId = `session_${task.name}_${Date.now()}`;
     const session: Session = {
       id: sessionId,
-      kind: "task",
       goal: task.goal,
       workspace,
       projectId: null,
@@ -79,6 +78,7 @@ export async function runGoldenTask(task: GoldenTask): Promise<TaskReport> {
       status: "running",
       failureReason: null,
       usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
+      approvalMode: "default",
       trustLevel: task.trustLevel,
       thinkingLevel: "off",
       completionCriteria: task.criteria,

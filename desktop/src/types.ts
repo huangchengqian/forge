@@ -11,9 +11,11 @@ export type TrustLevel = "low" | "medium" | "high";
  */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+/** Approval posture — mirror of the server's ApprovalMode. */
+export type ApprovalMode = "ask" | "default" | "always";
+
 export interface Session {
   id: string;
-  kind: "conversation" | "task";
   goal: string;
   workspace: string;
   projectId: string | null;
@@ -21,6 +23,7 @@ export interface Session {
   status: SessionStatus;
   failureReason: string | null;
   usage: SessionUsage;
+  approvalMode: ApprovalMode;
   trustLevel: TrustLevel;
   thinkingLevel: ThinkingLevel;
   createdAt: number;
@@ -154,6 +157,8 @@ export interface ConversationView {
   modelId: string | null;
   /** Provider id behind the effective model (authoritative picker key). */
   providerId: string | null;
+  /** Updated by APPROVAL_MODE_CHANGED events (mid-session approval switch). */
+  approvalMode: ApprovalMode | null;
   /** Updated by TRUST_CHANGED events (mid-session verification switch). */
   trustLevel: TrustLevel | null;
   /** Updated by THINKING_CHANGED events (mid-session reasoning switch). */

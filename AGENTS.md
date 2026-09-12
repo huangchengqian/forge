@@ -158,7 +158,13 @@ Every tool call is checked before execution.
    complete is worse than none. User-facing recovery = git + command approvals.
    Backups remain on disk under `<forgeHome>/undo/<sessionId>/`, manually
    recoverable.)
-3. Approval relay (ask → desktop dialog)
+3. Approval relay (ask → desktop dialog), gated by the session's approval
+   mode — `ask` (every mutation asks, the old behavior), `default` (safe
+   read-only bash whitelisted through, the rest asks; the new-session
+   default), `always` (nothing asks). The mode never relaxes a `deny`:
+   the destructive floor (sudo, rm -rf /, ...) holds in every mode. Live
+   switchable per session (`POST /sessions/:id/approval`), takes effect at
+   the next tool call.
 
 A denied tool call is blocked. A destructive tool call terminates the session.
 
@@ -173,7 +179,8 @@ Stuck detection prevents infinite loops.
 
 `shouldStopAfterTurn` detects:
 - agent monologue without tool calls (4 consecutive turns) — task sessions
-  only; conversation sessions are exempt because talking IS the product there
+  every session — there is no conversation kind to exempt (PM, 2026-09-12:
+  不做分流，所有输入都进执行型 agent; the old conversation exemption is retired)
 
 All four terminate the session with an honest `failureReason`
 (`stuck detected: ...`), never a silent "completed".
@@ -330,7 +337,7 @@ Every guardrail must have a UI entry point.
 
 | Guardrail | UI component |
 |---|---|
-| Guard ask (approval) | ApprovalDialog (real-time popup) |
+| Guard ask (approval) | ApprovalDialog (real-time popup) + 审批 level in the run picker (每次询问 / 默认 / 始终允许) |
 | Completion verification | VerificationPanel (appears on verification FAILURE; a passing run shows nothing) |
 | Usage & context | header token meter (↑in ↓out · ctx watermark) |
 | Stuck detection | In-place notice in the transcript |

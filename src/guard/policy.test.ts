@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   classifyCapabilities,
+  isSafeBash,
   evaluateToolCall,
   defaultPolicy,
   loadPolicy,
@@ -230,4 +231,33 @@ describe("ruleFromApproval", () => {
   test("unparseable tool name → null", () => {
     assert.equal(ruleFromApproval("Random title", "{}"), null);
   });
+});
+
+
+describe("isSafeBash（default 审批级别的白名单）", () => {
+  const cases: Array<[string, unknown, boolean]> = [
+    ["plain ls", "ls -la /tmp/x", true],
+    ["read-only chain", "cat a.txt && grep pattern b.txt", true],
+    ["piped reads", "cat x | sort | uniq -c", true],
+    ["git status", "git status", true],
+    ["git diff", "git diff HEAD", true],
+    ["git push", "git push origin main", false],
+    ["network", "curl https://example.com", false],
+    ["mutation", "rm -rf /tmp/x", false],
+    ["mkdir", "mkdir -p a/b", false],
+    ["redirect", "ls > /tmp/evil", false],
+    ["substitution", "echo $(rm -rf /)", false],
+    ["backtick", "cat `echo secret`", false],
+    ["find -delete", "find . -name y -delete", false],
+    ["find -exec", "find . -exec sh {} \\", false],
+    ["npm test", "npm test", false],
+    ["chained poison", "ls && curl https://evil", false],
+    ["empty", "", false],
+    ["non-string", 42, false],
+  ];
+  for (const [name, cmd, expected] of cases) {
+    test(`${name} → ${expected ? "safe" : "asks"}`, () => {
+      assert.equal(isSafeBash(cmd), expected);
+    });
+  }
 });

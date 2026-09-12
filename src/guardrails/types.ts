@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { CompletionConfig, Session } from "../types.ts";
+import type { ApprovalMode, CompletionConfig, Session } from "../types.ts";
 import type { UsageTracker } from "./usage-tracker.ts";
 
 /**

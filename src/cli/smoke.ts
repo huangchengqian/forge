@@ -114,7 +114,6 @@ async function main(): Promise<void> {
 
   const session: Session = {
     id: sessionId,
-    kind: "task",
     goal: "create hello.txt with content 'hello world'",
     workspace,
     projectId: null,
@@ -123,6 +122,7 @@ async function main(): Promise<void> {
     status: "running",
     failureReason: null,
     usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
+    approvalMode: "default",
     trustLevel: "low",
     thinkingLevel: "off",
     completionCriteria: [],

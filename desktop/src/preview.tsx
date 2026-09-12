@@ -46,7 +46,6 @@ const MIN = 60_000;
 const sessions = [
   {
     id: "s1",
-    kind: "task" as const,
     goal: "Add a --json flag to the CLI and cover it with tests",
     workspace: "/Users/hcq/demo",
     projectId: "p1",
@@ -54,6 +53,7 @@ const sessions = [
     status: "running" as const,
     failureReason: null,
     usage: { tokensIn: 3360, tokensOut: 840, cacheRead: 0, cacheWrite: 0, lastContextTokens: 3560 },
+    approvalMode: "default" as const,
     trustLevel: "medium" as const,
     thinkingLevel: "medium" as const,
     createdAt: now - 40 * MIN,
@@ -61,7 +61,6 @@ const sessions = [
   },
   {
     id: "s2",
-    kind: "task" as const,
     goal: "Refactor the event log to a FIFO per-session queue",
     workspace: "/Users/hcq/demo",
     projectId: "p1",
@@ -69,6 +68,7 @@ const sessions = [
     status: "completed" as const,
     failureReason: null,
     usage: { tokensIn: 9040, tokensOut: 2260, cacheRead: 0, cacheWrite: 0, lastContextTokens: 9240 },
+    approvalMode: "default" as const,
     trustLevel: "high" as const,
     thinkingLevel: "high" as const,
     createdAt: now - 26 * 60 * MIN,
@@ -76,7 +76,6 @@ const sessions = [
   },
   {
     id: "s3",
-    kind: "conversation" as const,
     goal: "What does the guardrail pipeline actually enforce?",
     workspace: "/Users/hcq/demo",
     projectId: "p1",
@@ -84,6 +83,7 @@ const sessions = [
     status: "completed" as const,
     failureReason: null,
     usage: { tokensIn: 640, tokensOut: 160, cacheRead: 0, cacheWrite: 0, lastContextTokens: 840 },
+    approvalMode: "default" as const,
     trustLevel: "low" as const,
     thinkingLevel: "off" as const,
     createdAt: now - 50 * 60 * MIN,
@@ -91,7 +91,6 @@ const sessions = [
   },
   {
     id: "s4",
-    kind: "task" as const,
     goal: "Fix the flaky sidecar handshake on port reuse",
     workspace: "/Users/hcq/demo",
     projectId: "p1",
@@ -99,6 +98,7 @@ const sessions = [
     status: "failed" as const,
     failureReason: "verification failed after 3 recovery attempts",
     usage: { tokensIn: 6160, tokensOut: 1540, cacheRead: 0, cacheWrite: 0, lastContextTokens: 6360 },
+    approvalMode: "default" as const,
     trustLevel: "medium" as const,
     thinkingLevel: "medium" as const,
     createdAt: now - 5 * 24 * 60 * MIN,
@@ -106,7 +106,6 @@ const sessions = [
   },
   {
     id: "s5",
-    kind: "task" as const,
     goal: "Vendor pi via npm workspaces",
     workspace: "/Users/hcq/demo",
     projectId: "p1",
@@ -114,6 +113,7 @@ const sessions = [
     status: "completed" as const,
     failureReason: null,
     usage: { tokensIn: 4400, tokensOut: 1100, cacheRead: 0, cacheWrite: 0, lastContextTokens: 4600 },
+    approvalMode: "default" as const,
     trustLevel: "medium" as const,
     thinkingLevel: "medium" as const,
     createdAt: now - 8 * 24 * 60 * MIN,
@@ -227,6 +227,7 @@ store.setState({
           verification,
           usage: { tokensIn: 4200, tokensOut: 900, contextTokens: 45000 },
           providerId: "prov_primary",
+          approvalMode: "default",
           modelId: null,
           trustLevel: null,
           thinkingLevel: null,
@@ -242,6 +243,7 @@ store.setState({
               verification: [],
               usage: { tokensIn: 300, tokensOut: 60, contextTokens: 12000 },
               providerId: "prov_primary",
+          approvalMode: "default",
               modelId: null,
               trustLevel: null,
               thinkingLevel: null,
@@ -251,6 +253,7 @@ store.setState({
               verification: [],
               usage: { tokensIn: 0, tokensOut: 0, contextTokens: null },
               providerId: null,
+              approvalMode: null,
               modelId: null,
               trustLevel: null,
               thinkingLevel: null,
@@ -363,6 +366,7 @@ createRoot(document.getElementById("root")!).render(
           failureReason={null}
           modelId={replay ? "MiniMax-M2.7" : active.model.modelId}
           providerId={replay ? "prov_primary" : active.model.provider}
+          approvalMode={replay ? "default" : active.approvalMode}
           trustLevel={replay ? "low" : active.trustLevel}
           thinkingLevel={replay ? "off" : active.thinkingLevel}
         />
@@ -386,6 +390,8 @@ createRoot(document.getElementById("root")!).render(
           providers={PREVIEW_PROVIDERS}
           activeProviderId="minimax-cn-anthropic"
           onSelectModel={() => {}}
+          approvalMode="default"
+          onSelectApprovalMode={() => {}}
           trustLevel="medium"
           onSelectTrust={() => {}}
           thinkingLevel="medium"

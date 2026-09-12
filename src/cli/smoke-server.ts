@@ -112,6 +112,24 @@ async function main(): Promise<void> {
     console.log(`  session created: ${sessionId}`);
     ok = ok && typeof sessionId === "string";
 
+    // 3.5 Approval-posture endpoint: invalid mode → 400, valid → 200 and
+    //     persisted (a UI switch the server silently drops would be a lie).
+    const badApproval = await fetch(`${base}/sessions/${sessionId}/approval`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ approvalMode: "yolo" }),
+    });
+    ok = ok && badApproval.status === 400;
+    const goodApproval = (await (
+      await fetch(`${base}/sessions/${sessionId}/approval`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ approvalMode: "always" }),
+      })
+    ).json()) as { approvalMode: string };
+    ok = ok && goodApproval.approvalMode === "always";
+    console.log(`  approval mode: ${goodApproval.approvalMode}`);
+
     // 4. Session readable — including the usage record the token meter reads
     //    (a field the server drops would make that meter a lie in the UI).
     const session = (await (await fetch(`${base}/sessions/${sessionId}`, { headers: auth })).json()) as {

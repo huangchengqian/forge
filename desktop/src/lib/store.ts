@@ -12,6 +12,7 @@ import type {
   ThinkingLevel,
   TrustLevel,
   VerificationView,
+  ApprovalMode,
 } from "../types.ts";
 
 export interface DesktopState {
@@ -42,6 +43,7 @@ export interface DesktopState {
     providerId?: string;
     trustLevel: TrustLevel;
     thinkingLevel?: ThinkingLevel;
+    approvalMode?: ApprovalMode;
     criteria?: Array<{ kind: string; [k: string]: unknown }>;
   }) => Promise<void>;
   steer: (message: string) => Promise<void>;
@@ -60,6 +62,7 @@ const emptyConversation = (): ConversationView => ({
   verification: [],
   usage: { tokensIn: 0, tokensOut: 0, contextTokens: null },
   providerId: null,
+  approvalMode: null,
   modelId: null,
   trustLevel: null,
   thinkingLevel: null,
@@ -337,6 +340,26 @@ export function reduceEnvelope(state: DesktopState, env: EventEnvelope): Partial
         icon: "⇄",
         text: `Model switched to ${String(payload.modelId ?? "unknown")} — applies from the next turn.`,
       });
+      return { conversation };
+    }
+
+    case "APPROVAL_MODE_CHANGED": {
+      const mode = String(payload.approvalMode ?? "");
+      if (mode === "ask" || mode === "default" || mode === "always") {
+        conversation.approvalMode = mode;
+        conversation.timeline = upsert(conversation.timeline, {
+          kind: "notice",
+          id: `approval-${stamp}`,
+          tone: "info",
+          icon: "✓",
+          text:
+            mode === "always"
+              ? "审批改为「始终允许」—— 命令不再弹窗（破坏性命令仍被拒绝）。"
+              : mode === "ask"
+                ? "审批改为「每次询问」。"
+                : "审批改为「默认」—— 白名单内的安全命令直接放行。",
+        });
+      }
       return { conversation };
     }
 

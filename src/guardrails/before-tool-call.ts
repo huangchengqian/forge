@@ -2,7 +2,7 @@ import type {
   BeforeToolCallContext,
   BeforeToolCallResult,
 } from "@earendil-works/pi-agent-core";
-import { evaluateToolCall, loadPolicy, defaultPolicyPath } from "../guard/policy.ts";
+import { evaluateToolCall, isSafeBash, loadPolicy, defaultPolicyPath } from "../guard/policy.ts";
 import { journalFile } from "../guard/journal.ts";
 import { appendEvent } from "../core/persistence/event-log.ts";
 import type { GuardrailConfig } from "./types.ts";
@@ -81,6 +81,24 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
       };
     }
 
+    // 1.5 Approval posture (session-level, live — see CompletionConfig).
+    // "always" releases every ask; "default" whitelists safe read-only bash.
+    // Deny decisions are NEVER relaxed: the destructive floor holds in every
+    // mode, and explicit user allow-rules in guard.json still win (mode only
+    // affects the built-in ask decisions).
+    const approvalMode = config.completion.approvalMode ?? "default";
+    let action = decision.action;
+    if (action === "ask" && approvalMode === "always") {
+      action = "allow";
+    } else if (
+      action === "ask" &&
+      approvalMode === "default" &&
+      toolName === "bash" &&
+      isSafeBash(input.command)
+    ) {
+      action = "allow";
+    }
+
     // 2. Undo journal backup before file mutation.
     if (
       (toolName === "write" || toolName === "edit") &&
@@ -91,7 +109,7 @@ export function makeBeforeToolCall(config: GuardrailConfig) {
     }
 
     // 3. `ask` → approval dialog, blocking with a hard timeout.
-    if (decision.action === "ask") {
+    if (action === "ask") {
       const requestId = ctx.toolCall.id;
       await appendEvent(config.sessionId, "GUARD_APPROVAL_REQUEST", {
         requestId,

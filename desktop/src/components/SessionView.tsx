@@ -3,7 +3,7 @@ import { store } from "../lib/store.ts";
 import { useModelCatalog } from "../lib/catalog.ts";
 import { Markdown } from "./Markdown.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
-import type { ProviderConfig, ThinkingLevel, TimelineEntry, TrustLevel } from "../types.ts";
+import type { ApprovalMode, ProviderConfig, ThinkingLevel, TimelineEntry, TrustLevel } from "../types.ts";
 
 /** One-line argument summary for a tool row (the full JSON lives behind expand). */
 function summarizeArgs(args: unknown): string {
@@ -144,6 +144,7 @@ export function SessionView({
   failureReason,
   modelId,
   providerId,
+  approvalMode,
   trustLevel,
   thinkingLevel,
 }: {
@@ -154,6 +155,7 @@ export function SessionView({
   modelId: string;
   /** Session.model.provider — the picker's key (authoritative namespace). */
   providerId: string;
+  approvalMode: ApprovalMode;
   trustLevel: TrustLevel;
   thinkingLevel: ThinkingLevel;
 }) {
@@ -181,6 +183,8 @@ export function SessionView({
   const effectiveTrust: TrustLevel = conversation.trustLevel ?? trustLevel;
   // THINKING_CHANGED events do the same for the reasoning effort.
   const effectiveThinking: ThinkingLevel = conversation.thinkingLevel ?? thinkingLevel;
+  // APPROVAL_MODE_CHANGED events do the same for the approval posture.
+  const effectiveApprovalMode: ApprovalMode = conversation.approvalMode ?? approvalMode;
   // Levels the running model actually supports (server-derived).
   const thinkingLevels =
     (effectiveProviderId ? capabilities[effectiveProviderId] : undefined) ?? ["off"];
@@ -249,6 +253,18 @@ export function SessionView({
       await switchThinking(sessionId, level);
     } catch (err) {
       console.error("thinking switch failed:", err);
+    }
+  };
+
+  // Approval-posture switch: takes effect at the NEXT TOOL CALL (live), not
+  // at a turn boundary — switching to 始终允许 should stop the popups now.
+  const onApprovalSwitch = async (mode: ApprovalMode) => {
+    if (mode === effectiveApprovalMode) return;
+    try {
+      const { switchApprovalMode } = await import("../lib/api.ts");
+      await switchApprovalMode(sessionId, mode);
+    } catch (err) {
+      console.error("approval switch failed:", err);
     }
   };
 
@@ -426,6 +442,8 @@ export function SessionView({
                   thinkingLevel={effectiveThinking}
                   thinkingLevels={thinkingLevels}
                   onSelectThinking={(level) => void onThinkingSwitch(level)}
+                  approvalMode={effectiveApprovalMode}
+                  onSelectApprovalMode={(mode) => void onApprovalSwitch(mode)}
                   placement="above"
                 />
                 {!connected && (

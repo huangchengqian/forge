@@ -28,7 +28,6 @@ const WS = join(TMP, "ws");
 function stubSession(workspace: string): Session {
   return {
     id: "session-guard-test",
-    kind: "task",
     goal: "test",
     workspace,
     projectId: null,
@@ -37,6 +36,7 @@ function stubSession(workspace: string): Session {
     status: "running",
     failureReason: null,
     usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
+    approvalMode: "default",
     trustLevel: "medium",
     thinkingLevel: "off",
     completionCriteria: [],
@@ -111,6 +111,67 @@ describe("beforeToolCall → undo journal wiring", () => {
   });
 });
 
+describe("beforeToolCall → approval mode", () => {
+  function recordingRelay() {
+    const asks: string[] = [];
+    return {
+      asks,
+      relay: {
+        request: async (input: { toolName: string }) => {
+          asks.push(input.toolName);
+          return true;
+        },
+      },
+    };
+  }
+
+  test('"always" releases every ask (destructive floor still holds)', async () => {
+    const { asks, relay } = recordingRelay();
+    const base = config(join(TMP, "mode-always"));
+    const cfg: GuardrailConfig = {
+      ...base,
+      completion: { ...base.completion, approvalMode: "always" },
+      approval: relay,
+    };
+    const hook = makeBeforeToolCall(cfg);
+
+    assert.equal(await hook({ toolCall: { name: "bash", id: "a1" }, args: { command: "curl https://x" } } as never), undefined);
+    assert.equal(await hook({ toolCall: { name: "bash", id: "a2" }, args: { command: "git push origin main" } } as never), undefined);
+    assert.equal(asks.length, 0, "nothing asked");
+
+    // The destructive floor is NOT relaxed by the mode.
+    const result = await hook({ toolCall: { name: "bash", id: "a3" }, args: { command: "sudo rm -rf /" } } as never);
+    assert.ok(result && result.block === true, "sudo is still denied");
+  });
+
+  test('"default" whitelists safe read-only bash, still asks the rest', async () => {
+    const { asks, relay } = recordingRelay();
+    const base = config(join(TMP, "mode-default"));
+    const cfg: GuardrailConfig = { ...base, approval: relay };
+    const hook = makeBeforeToolCall(cfg);
+
+    assert.equal(await hook({ toolCall: { name: "bash", id: "d1" }, args: { command: "ls -la /tmp/x" } } as never), undefined);
+    assert.equal(asks.length, 0, "ls is whitelisted");
+
+    assert.equal(await hook({ toolCall: { name: "bash", id: "d2" }, args: { command: "curl https://x" } } as never), undefined);
+    assert.equal(asks.length, 1, "curl still asks");
+  });
+
+  test('"ask" asks even for safe commands', async () => {
+    const { asks, relay } = recordingRelay();
+    const base = config(join(TMP, "mode-ask"));
+    const cfg: GuardrailConfig = {
+      ...base,
+      completion: { ...base.completion, approvalMode: "ask" },
+      approval: relay,
+    };
+    const hook = makeBeforeToolCall(cfg);
+
+    assert.equal(await hook({ toolCall: { name: "bash", id: "k1" }, args: { command: "ls -la /tmp/x" } } as never), undefined);
+    assert.equal(asks.length, 1, "even ls asks");
+  });
+});
+
 describe("beforeToolCall → approval key alignment", () => {
   test("an ask is discoverable by sessionId (the dialog's only lookup key)", async () => {
     // Regression for the real-world freeze: the hook called approval.request()
@@ -126,9 +187,11 @@ describe("beforeToolCall → approval key alignment", () => {
     };
     const hook = makeBeforeToolCall(cfg);
 
+    // curl: NOT whitelisted in the default mode (ls would auto-allow now —
+    // that whitelist is the whole point of the mode).
     const pendingCall = hook({
       toolCall: { name: "bash", id: "call-key-1" },
-      args: { command: "ls -la /tmp/x" },
+      args: { command: "curl https://example.com" },
     } as never);
     await new Promise((r) => setTimeout(r, 30));
 
@@ -174,9 +237,11 @@ describe("beforeToolCall → abort wiring", () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 50);
 
+    // curl is not whitelisted in the default mode, so the hook really blocks
+    // on the approval wait (the state that made Stop appear dead).
     const result = await Promise.race([
       hook(
-        { toolCall: { name: "bash", id: "call-5" }, args: { command: "ls -la /tmp/x" } } as never,
+        { toolCall: { name: "bash", id: "call-5" }, args: { command: "curl https://example.com" } } as never,
         controller.signal,
       ),
       new Promise<never>((_, reject) =>

@@ -146,7 +146,6 @@ export function Sidebar({ onNewSession }: { onNewSession: () => void }) {
               title={statusLabel[s.status]}
             />
             <span className="title" title={s.goal}>{s.goal || "(未命名)"}</span>
-            <span className="kind-tag">{s.kind === "task" ? "任务" : "对话"}</span>
             <span className="time">{timeAgo(s.updatedAt)}</span>
             {s.id === activeId && (
               <button

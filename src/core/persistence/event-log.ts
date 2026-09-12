@@ -47,6 +47,8 @@ export type PersistedEventType =
   // guardrails (Phase 3+; reserved so event types cover everything the UI renders)
   | "STEERING_QUEUED"
   | "VERIFICATION_RESULT"
+  // Mid-session approval-posture switch (POST /sessions/:id/approval)
+  | "APPROVAL_MODE_CHANGED"
   // Per-session token usage (2026-09-11, replaces COST_UPDATE for new logs;
   // COST_UPDATE stays in the union because historical logs contain it).
   // Payload shape: { tokensIn, tokensOut, cacheRead, cacheWrite, contextTokens }

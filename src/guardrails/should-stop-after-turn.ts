@@ -129,14 +129,14 @@ export function makeShouldStopAfterTurn(config: GuardrailConfig) {
     // terminates with an honest failureReason (same shape as afterToolCall's
     // stuck termination). Conversation sessions are exempt: talking IS the
     // product there.
-    if (config.session.kind !== "conversation") {
-      monologueTurns++;
-      if (monologueTurns >= MONOLOGUE_TURNS) {
-        const reason = `stuck detected: monologue (${monologueTurns} consecutive turns without tool calls)`;
-        config.session.failureReason = reason;
-        await recordVerification(false, reason).catch(() => {});
-        return true;
-      }
+    // Monologue guard applies to EVERY session — there is no conversation
+    // kind to exempt (PM, 2026-09-12: 不做分流，所有输入都进执行型 agent).
+    monologueTurns++;
+    if (monologueTurns >= MONOLOGUE_TURNS) {
+      const reason = `stuck detected: monologue (${monologueTurns} consecutive turns without tool calls)`;
+      config.session.failureReason = reason;
+      await recordVerification(false, reason).catch(() => {});
+      return true;
     }
 
     // --- 4. Model intends to stop → verification by trust level ---

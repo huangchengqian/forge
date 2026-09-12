@@ -2,9 +2,18 @@ import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core"
 import type { SuccessCriterion } from "./core/types/criterion.ts";
 import type { EvaluationResult } from "./core/types/evaluation.ts";
 
-export type SessionKind = "conversation" | "task";
 export type SessionStatus = "running" | "completed" | "failed" | "cancelled";
 export type TrustLevel = "low" | "medium" | "high";
+
+/**
+ * Approval posture for mutating tool calls (bash / git / network).
+ * - "ask": every one asks (the pre-v0.3e behavior).
+ * - "default": safe read-only commands are whitelisted through (ls, cat,
+ *   git status, ...); everything else asks.
+ * - "always": nothing asks. The destructive floor (sudo, rm -rf /, ...) is
+ *   NOT relaxed — deny rules still terminate the session.
+ */
+export type ApprovalMode = "ask" | "default" | "always";
 
 /**
  * Reasoning effort, re-exported from Pi so the string set cannot drift.
@@ -20,7 +29,6 @@ export type { ThinkingLevel };
  */
 export interface Session {
   id: string;
-  kind: SessionKind;
   goal: string;
   workspace: string;
   projectId: string | null;
@@ -30,6 +38,7 @@ export interface Session {
   failureReason: string | null;
   /** Cumulative token usage + context watermark (persisted; hydrates UsageTracker on resume). */
   usage: SessionUsage;
+  approvalMode: ApprovalMode;
   trustLevel: TrustLevel;
   /**
    * Reasoning effort sent with every provider request. Persisted since
@@ -55,4 +64,6 @@ export interface SessionUsage {
 export interface CompletionConfig {
   trustLevel: TrustLevel;
   criteria: SuccessCriterion[];
+  /** Approval posture; absent = "default". Rides the live run-config carrier. */
+  approvalMode?: ApprovalMode;
 }

@@ -18,6 +18,7 @@ import type { ProviderConfig } from "./config-store.ts";
 import type {
   Session,
   SessionStatus,
+  ApprovalMode,
   TrustLevel,
   ThinkingLevel,
   CompletionConfig,
@@ -97,7 +98,7 @@ export class SessionManager {
     trustLevel?: TrustLevel | undefined;
     thinkingLevel?: ThinkingLevel | undefined;
     criteria?: SuccessCriterion[] | undefined;
-    kind?: "conversation" | "task" | undefined;
+    approvalMode?: ApprovalMode | undefined;
   }): Promise<{ sessionId: string }> {
     // 1. Resolve the subscription (explicit providerId or the default one).
     const cfg = await loadForgeConfig(this.opts.forgeHome);
@@ -123,7 +124,6 @@ export class SessionManager {
     const thinkingLevel: ThinkingLevel = input.thinkingLevel ?? "medium";
     const session: Session = {
       id: sessionId,
-      kind: input.kind ?? "task",
       goal: input.goal,
       workspace,
       projectId: project?.id ?? null,
@@ -132,6 +132,7 @@ export class SessionManager {
       status: "running",
       failureReason: null,
       usage: { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, lastContextTokens: null },
+      approvalMode: input.approvalMode ?? "default",
       trustLevel,
       thinkingLevel,
       completionCriteria: input.criteria ?? [],
@@ -151,6 +152,7 @@ export class SessionManager {
       {
         trustLevel,
         criteria: input.criteria ?? [],
+        approvalMode: session.approvalMode,
       },
     );
 
@@ -371,6 +373,31 @@ export class SessionManager {
 
     await appendEvent(sessionId, "THINKING_CHANGED", { thinkingLevel }).catch(() => {});
     return { thinkingLevel };
+  }
+
+  /**
+   * Mid-session approval-posture switch. Unlike thinking (which waits for a
+   * turn boundary), the guardrails config shares the live `completion`
+   * object with the loop — mutating it here takes effect at the very next
+   * tool call. An already-pending dialog is NOT retroactively released; the
+   * user still answers the one on screen.
+   */
+  async switchApprovalMode(
+    sessionId: string,
+    approvalMode: ApprovalMode,
+  ): Promise<{ approvalMode: ApprovalMode }> {
+    const session = await loadSession(sessionId);
+    if (!session) throw new Error(`session ${sessionId} not found`);
+
+    session.approvalMode = approvalMode;
+    session.updatedAt = Date.now();
+    await saveSession(session);
+
+    const runtime = this.runtimes.get(sessionId);
+    if (runtime) runtime.completion.approvalMode = approvalMode;
+
+    await appendEvent(sessionId, "APPROVAL_MODE_CHANGED", { approvalMode }).catch(() => {});
+    return { approvalMode };
   }
 
   /**

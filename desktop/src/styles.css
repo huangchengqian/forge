@@ -256,12 +256,6 @@ body {
   50% { opacity: 0.45; transform: scale(0.78); }
 }
 
-.kind-tag {
-  flex-shrink: 0; font-size: 9px; font-weight: 650; letter-spacing: 0.05em;
-  color: var(--text-muted); background: color-mix(in srgb, var(--text) 8%, transparent);
-  border-radius: 4px; padding: 1.5px 4px;
-}
-.session-item.selected .kind-tag { color: var(--text-secondary); }
 
 /* Delete affordance: hidden until the row is hovered, so the list reads as a
    column of titles rather than a column of controls.
